@@ -394,13 +394,13 @@ raise SystemExit(module.main())
     router = tmp_path / 'router.php'
     router.write_text("<?php $_SERVER['HTTPS']='on'; require "+php_string(root / 'hosting/index.php')+";")
     with socket.socket() as listener:
-        listener.bind(('127.0.0.1',0))
+        listener.bind(('localhost',0))
         port = listener.getsockname()[1]
     env = dict(os.environ, BOOMER_BRIDGE_CONFIG=str(bridge_config))
-    process = subprocess.Popen([str(php),'-n','-S',f'127.0.0.1:{port}',str(router)],cwd=tmp_path,env=env,
+    process = subprocess.Popen([str(php),'-n','-S',f'localhost:{port}',str(router)],cwd=tmp_path,env=env,
                                stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
     def http(path, body=None, cookie='', csrf=''):
-        connection = HTTPConnection('127.0.0.1',port,timeout=5)
+        connection = HTTPConnection('localhost',port,timeout=5)
         headers = {'Cookie':cookie,'Origin':'https://site.invalid','X-CSRF-Token':csrf,'Content-Type':'application/json'}
         try:
             connection.request('POST' if body is not None else 'GET','/lights'+path,json.dumps(body) if body is not None else None,headers)
