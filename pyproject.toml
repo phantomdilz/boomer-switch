@@ -11,10 +11,11 @@ license = "MIT"
 license-files = ["LICENSE"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8,<10", "pytest-xdist>=3,<4", "segno==1.6.6", "mnemonic==0.21", "pypdf==7.0.0", "reportlab==5.1.0"]
+dev = ["pytest>=8,<10", "pytest-xdist>=3,<4", "segno==1.6.6", "mnemonic==0.21", "pypdf==7.0.0", "reportlab==5.1.0", "python-kasa==0.12.0", "aiohttp==3.14.5", "cryptography==50.0.2"]
 demo = ["playwright==1.62.0", "segno==1.6.6", "Pillow==13.0.0", "zxing-cpp==3.1.1", "mnemonic==0.21"]
 website = ["mnemonic==0.21"]
 pdf = ["pypdf==7.0.0", "reportlab==5.1.0", "segno==1.6.6", "mnemonic==0.21"]
+pilot = ["python-kasa==0.12.0", "aiohttp==3.14.5"]
 
 [tool.setuptools.packages.find]
 include = ["boomer_switch*"]
@@ -31,6 +32,7 @@ markers = [
   "registration: invitations, verification, and demo access",
   "people: private owner access management",
   "cards: private-template invitation rendering",
+  "pilot: real-provider adapters and closed-by-default live ingress",
   "tooling: test infrastructure checks",
   "smoke: fast deterministic acceptance checks",
 ]
