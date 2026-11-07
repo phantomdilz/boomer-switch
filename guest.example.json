@@ -1,0 +1,21 @@
+{
+  "origin": "https://example.invalid:8769",
+  "website_guest_url": "https://example.invalid/house-lights/guest",
+  "website_exchange_url": "https://example.invalid/house-lights/exchange",
+  "website_key": "REPLACE_WITH_PRIVATE_RANDOM_SERVICE_KEY",
+  "home_url": "https://example.invalid:8770",
+  "home_ca": "config.local.home-ca.pem",
+  "client_cert": "config.local.guest-client.pem",
+  "client_key": "config.local.guest-client-key.pem",
+  "server_cert": "config.local.browser-cert.pem",
+  "server_key": "config.local.browser-key.pem",
+  "light_id": "pilot-lamp",
+  "wifi": {
+    "guid": "SELECTED_PRIVATE_WLAN_GUID",
+    "index": 1,
+    "address": "SELECTED_PRIVATE_WIFI_ADDRESS",
+    "prefix": 24,
+    "ssid_hex": "SELECTED_PRIVATE_SSID_HEX",
+    "bssid_hex": "SELECTED_PRIVATE_BSSID_HEX"
+  }
+}
