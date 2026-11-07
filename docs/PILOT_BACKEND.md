@@ -7,6 +7,15 @@ No deployment, certificate installation, live provider call, or physical switch 
 
 ## First check: phone-to-spare reachability
 
+On Windows, download `guest-reachability.cmd` and double-click it. No Python installation is needed.
+The check selects the sole connected Wi-Fi adapter and its private IPv4 address.
+It prints the exact URL for the phone and closes after 2 minutes.
+If Wi-Fi is missing or ambiguous, it shows a plain error and waits for a key.
+
+It does not change firewall or network settings. Keep the window open to report the result.
+
+The Python entry point remains available for operators who select the address explicitly:
+
 On the spare computer, select its actual guest wireless address and an unused port.
 Run this command only within the approved local reachability scope:
 

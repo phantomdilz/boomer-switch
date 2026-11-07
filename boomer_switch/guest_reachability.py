@@ -26,7 +26,8 @@ def serve_marker(address, port, seconds, *, clock=time.monotonic, socket_factory
     with socket_factory(socket.AF_INET, socket.SOCK_STREAM) as listener:
         listener.bind((address, port))
         listener.listen(2)
-        print("Harmless reachability marker ready for the configured finite lifetime.", flush=True)
+        print(f"Open http://{address}:{port}/ on the phone within {seconds} seconds.", flush=True)
+        print("This page only checks reachability. Press Ctrl+C to stop.", flush=True)
         while clock() < deadline:
             listener.settimeout(min(1, deadline - clock()))
             try:
