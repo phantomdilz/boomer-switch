@@ -12,13 +12,18 @@ from .registration import AccessDenied, _digest
 
 
 class WebsiteHandoff:
-    def __init__(self, store, service_key, callback):
+    def __init__(self, store, service_key, callback, entry=None):
         target = urlsplit(callback)
         if target.scheme != "https" or not target.netloc or target.username or target.query or target.fragment:
             raise ValueError("Configure the exact HTTPS home callback.")
         if not isinstance(service_key, str) or len(service_key) < 32:
             raise ValueError("Configure a private service key of at least 32 characters.")
-        self.store, self.key, self.callback = store, service_key, callback
+        if entry is None:
+            entry = callback.rsplit('/', 1)[0] + '/start'
+        start = urlsplit(entry)
+        if start.scheme != 'https' or start.netloc != target.netloc or start.username or start.query or start.fragment:
+            raise ValueError("Configure a fixed HTTPS home entry on the callback origin.")
+        self.store, self.key, self.callback, self.entry = store, service_key, callback, entry
         with store._transaction() as db:
             db.execute("CREATE TABLE IF NOT EXISTS home_sessions (id TEXT PRIMARY KEY, website_session TEXT NOT NULL, expires REAL NOT NULL)")
             db.execute("CREATE TABLE IF NOT EXISTS website_handoffs (id TEXT PRIMARY KEY, website_session TEXT NOT NULL, challenge TEXT NOT NULL, expires REAL NOT NULL, request_id TEXT, home_expires REAL)")

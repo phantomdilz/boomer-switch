@@ -19,7 +19,7 @@ It does not need a persistent Python listener.
 
 The bridge bounds request bodies, response bodies, and process duration.
 PHP must support `proc_open`, an array command, and the configured Python interpreter.
-The bridge expects Linux `/dev/null` and PHP 8.2.
+The bridge requires PHP 8.2.
 Check these facts before installation.
 
 ## Private configuration
@@ -52,6 +52,7 @@ The private JSON file has these keys:
 - `mount`: the same dedicated URL prefix.
 - `owner_identity`: the same internal owner constant.
 - `service_key`: at least 32 private characters, shared only with the home service.
+- `home_entry`: fixed HTTPS home front door at `/auth/start`, on the callback origin.
 - `home_callback`: exact HTTPS callback URL on the home guest service, without a query or fragment.
 - `mail`: the transport settings below.
 
@@ -73,9 +74,10 @@ Use the existing website transport. Do not provision another mail provider.
 7. Exempt public guest paths from any inherited whole-site login redirect.
 8. Keep `/people`, `/people.js`, and `/api/people` behind the current owner validator.
 9. Keep the rest of the website's root, login, files, and routes unchanged.
-10. Disable URL query logging for the home callback and invitation paths.
-11. Verify HTTPS and private-route rejection before a scoped live mail demo.
-12. Test one guest code and one owner notice only with explicit mail authority.
+10. Suppress or redact full request targets for `/invite/<token>` and `/s/<alias>` before live links.
+11. Redact the home callback query before a live exchange.
+12. Verify HTTPS and private-route rejection before a scoped live mail demo.
+13. Test one guest code and one owner notice only with explicit mail authority.
 
 No live mail, public upload, or production configuration read forms part of local verification.
 If a route rewrite, authentication hook, or transport setting is unknown, retain the staged release privately.
@@ -85,6 +87,8 @@ Do not route public requests to an incomplete bridge.
 
 The website cookie is Secure, HttpOnly, and SameSite=Strict.
 Its path is the component namespace. It never becomes a home session.
+An approved guest from the printed card can select **Open home controls** to open that fixed home entry.
+
 The home front door creates a browser-bound random challenge and state.
 It opens the website guest page with `#challenge=OPAQUE_CHALLENGE&state=OPAQUE_STATE`.
 The website removes the fragment and keeps these values in that tab's session storage.
@@ -110,7 +114,10 @@ No cross-domain cookie sharing is required.
 ## Mail outcomes and recovery
 
 Registration keeps its existing per-email and global send limits.
+An unmarked database with historical demo mail cannot activate the live transport.
+Expired or superseded codes never enter the transport.
 Each durable mail row has one claim and one stable Message-ID.
+
 The worker clears code plaintext before an external send.
 It sends at most 4 messages per request, with a 5-second timeout for each transport operation.
 Owner notices use the canonical verified pending revision, so repeat verification does not duplicate a notice.
@@ -132,3 +139,25 @@ Do not restore an old database over accepted People decisions.
 
 Reinstall the prior reviewed code only when its schema remains compatible.
 The added tables do not change the existing registration tables.
+
+## Private production card
+
+Use the existing blank private master and operator-verified URLs from the installed website namespace.
+Create a private JSON record with exactly `verified: true`, `invite_url`, and `short_url`.
+Both URLs must use HTTPS and the same website namespace.
+The invitation path ends with `/invite/OPAQUE_TOKEN`. The short path ends with `/s/ALIAS`.
+Only mark the record verified after an authorized check confirms both routes refer to the current invitation.
+This command renders the card without a network request or live-link creation:
+
+```text
+python -m boomer_switch.website_card --verified-urls PRIVATE_URL_RECORD --template PRIVATE_MASTER --output PRIVATE_CARD
+```
+
+Install the `pdf` extra for this local card command.
+Keep the record, master, and card outside the public document root and source checkout.
+The renderer preserves the master and removes demo-only labels for this explicit production mode.
+The command prints no URLs or invitation secrets.
+
+SMTP uses a 5-second timeout for each socket operation, rather than a total send deadline.
+The PHP bridge enforces a 25-second outer process limit.
+A direct WSGI host must enforce an equivalent total request deadline before live mail.
