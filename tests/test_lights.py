@@ -56,6 +56,7 @@ def service(device, lights=None):
     return LightService((selected(),) if lights is None else lights, resolve), resolved
 
 
+@pytest.mark.smoke
 def test_explicit_standalone_selection_controls_on_and_off():
     device = FakeDevice()
     owner, resolved = service(device)
@@ -70,6 +71,7 @@ def test_explicit_standalone_selection_controls_on_and_off():
 
 
 @pytest.mark.parametrize("target,action", [("unselected-light", "on"), ("synthetic-device", "off"), ("sample-lamp", "toggle"), ("sample-lamp", "ON")])
+@pytest.mark.smoke
 def test_denied_requests_never_resolve_or_touch_a_device(target, action):
     device = FakeDevice()
     owner, resolved = service(device)
@@ -87,6 +89,7 @@ def test_empty_allowlist_denies_all_commands_and_reads():
     assert resolved == []
 
 
+@pytest.mark.smoke
 def test_only_the_selected_outlet_receives_a_command():
     selected_child = FakeDevice("synthetic-outlet-a")
     sibling = FakeDevice("synthetic-outlet-b")
@@ -97,6 +100,44 @@ def test_only_the_selected_outlet_receives_a_command():
     assert sibling.calls == []
     assert parent.calls == ["update", "update"]
     assert resolved == ["synthetic-device"]
+
+
+def test_commands_on_one_parent_complete_in_order_without_shared_state_races():
+    first = FakeDevice("synthetic-outlet-a")
+    second = FakeDevice("synthetic-outlet-b")
+    parent = FakeDevice(children=[first, second])
+    trace = []
+
+    async def update():
+        trace.append("refresh")
+        await asyncio.sleep(0)
+
+    async def first_on():
+        trace.append("first:on")
+        await asyncio.sleep(0)
+        first.is_on = True
+
+    async def second_off():
+        trace.append("second:off")
+        await asyncio.sleep(0)
+        second.is_on = False
+
+    parent.update = update
+    first.turn_on = first_on
+    second.turn_off = second_off
+    owner, _ = service(parent, (
+        selected(outlet_id="synthetic-outlet-a"),
+        selected(light_id="other-lamp", outlet_id="synthetic-outlet-b"),
+    ))
+
+    async def scenario():
+        return await asyncio.gather(
+            owner.command("sample-lamp", "on"),
+            owner.command("other-lamp", "off"),
+        )
+
+    assert asyncio.run(scenario()) == [LightState.ON, LightState.OFF]
+    assert trace == ["refresh", "first:on", "refresh", "refresh", "second:off", "refresh"]
 
 
 @pytest.mark.parametrize("outlet", [None, "missing-outlet"])
@@ -133,6 +174,7 @@ def test_ambiguous_outlet_identity_never_receives_a_command():
     assert all(child.calls == [] for child in children)
 
 
+@pytest.mark.smoke
 def test_report_device_state_instead_of_requested_state():
     device = FakeDevice()
     device.ignore_command = True

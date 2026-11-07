@@ -4,7 +4,7 @@ import pytest
 
 
 MODULE_MARKERS = {
-    "test_lights.py": ("lights", "smoke"),
+    "test_lights.py": ("lights",),
     "test_tooling.py": ("tooling",),
 }
 
