@@ -17,6 +17,48 @@ A mobile-friendly web page that lets invited, owner-approved guests turn househo
 
 See [docs/BRIEF.md](docs/BRIEF.md) for the full brief and [AGENTS.md](AGENTS.md) for contribution rules.
 
+## Local control boundary
+
+`boomer_switch.lights.LightService` enforces the selected devices and individual outlets before each command.
+It accepts only a configured `light_id` and the actions `on` or `off`.
+It never commands a strip parent or an unselected outlet.
+The display list contains only each light's ID, name, and room.
+
+Copy `devices.example.json` to the ignored file `config.local.devices.json`.
+Replace its placeholders with owner-selected values from local discovery.
+Use `{"lights": []}` to select no lights.
+Keep all real inventory, addresses, identifiers, and credentials in ignored local files.
+An absent or invalid allowlist stops configuration. It never selects discovered devices by default.
+
+Load the file with `load_allowlist(Path("config.local.devices.json"))`.
+Pass those entries and a trusted async resolver to `LightService`.
+The resolver accepts the configured parent `device_id` and returns the matching python-kasa device.
+An `outlet_id` selects one exact child device ID under that parent.
+Use `null` only for a standalone bulb or plug.
+Other device types are unavailable in this first boundary.
+Reload the service after the owner changes the selection.
+
+The service refreshes device state before control and after each command.
+It returns `on`, `off`, or `unavailable` from confirmed device state.
+A timeout or uncertain command returns `unavailable`. The service does not retry commands.
+The default total timeout is 5 seconds, including the wait for another command on the same device.
+Provider errors and private device IDs never appear in the result.
+
+This module has no HTTP endpoint or guest access check.
+The future server caller must check current guest permission before each call.
+It must keep the resolver and local configuration private.
+Local synthetic tests do not establish compatibility with installed hardware.
+
+## Synthetic tests
+
+Use Python 3.11 or later.
+Install the development dependencies in a local virtual environment with `python -m pip install -e ".[dev]"`.
+Run `python run_tests.py full --workers 2` from that environment.
+The `smoke`, `lights`, and `tooling` tiers also accept ordinary pytest selectors.
+Use `--durations 10 --slow-threshold 1` for a duration report.
+
+The runner uses separate temporary paths and parallel workers. The tests never contact real devices.
+
 ## Open decisions
 - Email delivery method for one-time codes
 - Owner notification channel

@@ -1,0 +1,1 @@
+"""Local light-control domain."""
