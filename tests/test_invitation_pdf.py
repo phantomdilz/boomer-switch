@@ -207,3 +207,38 @@ def test_cli_pdf_qr_and_printed_address_match_on_both_designs(tmp_path):
             codes = decoder.read_barcodes(bitmap)
         assert len(codes) == 1
         assert codes[0].text == card["invite_url"]
+
+
+def test_production_card_uses_verified_existing_urls_without_sample_labels_or_master_change(tmp_path):
+    from boomer_switch.website_card import render_hosted_card
+    master = synthetic_template(tmp_path / 'private.pdf')
+    before = checksum(master)
+    urls = {'verified':True, 'invite_url':'https://site.invalid/lights/invite/'+'x'*43,
+            'short_url':'https://site.invalid/lights/s/fourwords'}
+    output = render_hosted_card(master, tmp_path / 'private-card.pdf', urls)
+    reader = PdfReader(output)
+    assert checksum(master) == before and len(reader.pages) == 2
+    for page in reader.pages:
+        text = page.extract_text()
+        assert 'SAMPLE' not in text and 'not a live invitation' not in text
+        assert urls['short_url'] in ''.join(text.split())
+        assert 'HOUSE LIGHTS INVITATION' in text
+    assert reader.metadata['/Title'] == 'House Lights invitation'
+    assert reader.metadata.get('/Author') is None
+    with pytest.raises(ValueError):
+        render_hosted_card(master, tmp_path / 'rejected.pdf', urls | {'verified':False})
+    with pytest.raises(ValueError):
+        render_hosted_card(master, tmp_path / 'rejected.pdf', urls | {'short_url':'https://other.invalid/lights/s/alias'})
+    with pytest.raises(ValueError):
+        render_hosted_card(master, master, urls)
+
+
+def test_card_cli_does_not_overwrite_verified_url_record(tmp_path):
+    master = synthetic_template(tmp_path / 'master.pdf')
+    record = tmp_path / 'config.local.json'
+    record.write_text(json.dumps({'verified':True,'invite_url':'https://site.invalid/lights/invite/'+'x'*43,
+                                  'short_url':'https://site.invalid/lights/s/alias'}))
+    before = checksum(record)
+    result = subprocess.run([sys.executable,'-m','boomer_switch.website_card','--verified-urls',str(record),
+                             '--template',str(master),'--output',str(record)], capture_output=True, timeout=10)
+    assert result.returncode != 0 and checksum(record) == before

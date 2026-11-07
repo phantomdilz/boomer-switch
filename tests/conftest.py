@@ -7,6 +7,8 @@ MODULE_MARKERS = {
     "test_lights.py": ("lights",),
     "test_demo.py": ("demo",),
     "test_registration.py": ("registration",),
+    "test_rendezvous.py": ("registration", "pilot"),
+    "test_website.py": ("registration", "people"),
     "test_people.py": ("people",),
     "test_invitation_pdf.py": ("cards",),
     "test_pilot.py": ("pilot",),

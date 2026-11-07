@@ -150,16 +150,23 @@ def proxy():
         relay=Relay(), exchange=Exchange(), clock=lambda: 1000)
 
 
-def test_browser_handoff_then_ordinary_read_and_command_with_no_direct_bypass():
+@pytest.mark.parametrize("start_method", ["GET", "POST"])
+def test_browser_handoff_then_ordinary_read_and_command_with_no_direct_bypass(start_method):
     app = proxy()
 
     async def scenario():
         assert (await app.handle(Request())).status == 403
-        start = await app.handle(Request("/auth/start", "POST", {}, headers={"Origin": ORIGIN}))
+        start = await app.handle(Request("/auth/start", start_method, {} if start_method == "POST" else None, headers={"Origin": ORIGIN}))
+        assert start.status == (303 if start_method == "GET" else 200)
         pending_cookie = start.cookies["bs_pending"].value
         assert start.cookies["bs_pending"]["secure"] and start.cookies["bs_pending"]["httponly"]
         assert start.cookies["bs_pending"]["samesite"] == "Lax"
-        fragment = parse_qs(urlsplit(json.loads(start.body)["url"]).fragment)
+        target = start.headers["Location"] if start_method == "GET" else json.loads(start.body)["url"]
+        fragment = parse_qs(urlsplit(target).fragment)
+        assert target.startswith(ORIGIN + "/guest#")
+        wrong_browser = Request("/auth/callback", query={"code": "c" * 43, "state": fragment["state"][0]})
+        assert (await app.handle(wrong_browser)).status == 403
+        assert pending_cookie in app.pending and not app.exchange.calls
         callback = Request("/auth/callback", cookies={"bs_pending": pending_cookie},
             query={"code": "c" * 43, "state": fragment["state"][0]})
         result = await app.handle(callback)
