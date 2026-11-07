@@ -435,3 +435,52 @@ raise SystemExit(module.main())
     finally:
         process.terminate()
         process.wait(timeout=5)
+
+
+def test_hosted_fixture_idle_bare_tcp_does_not_block_https_or_shutdown(tmp_path):
+    import importlib
+    from http.client import HTTPSConnection
+    import socket
+    import ssl
+    from threading import Event, Thread
+    pytest.importorskip('playwright.sync_api', reason='This fixture check requires the optional demo dependencies.')
+    pytest.importorskip('PIL.Image', reason='This fixture check requires the optional demo dependencies.')
+    pytest.importorskip('zxingcpp', reason='This fixture check requires the optional demo dependencies.')
+    demo = importlib.import_module('demos.hosted_website_acceptance')
+    accepted = Event()
+    class ProbeServer(demo.FixtureServer):
+        def get_request(self):
+            result = super().get_request()
+            accepted.set()
+            return result
+    cert, key = demo.make_certificate(tmp_path)
+    tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    tls.load_cert_chain(cert, key)
+    def app(environ, start):
+        start('200 OK', [('Content-Type','text/plain'),('Content-Length','5')])
+        return [b'ready']
+    server = demo.make_server(demo.LOOPBACK,0,app,server_class=ProbeServer,handler_class=demo.QuietHandler)
+    server.enable_tls(tls)
+    worker = Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    idle = socket.create_connection((demo.LOOPBACK,server.server_port),timeout=2)
+    connection = HTTPSConnection('localhost',server.server_port,timeout=2,context=ssl.create_default_context(cafile=str(cert)))
+    cleanup = Thread(target=lambda: (server.shutdown(), server.server_close()), daemon=True)
+    try:
+        assert accepted.wait(2), 'The fixture blocked before it accepted bare TCP.'
+        connection.request('GET','/')
+        response = connection.getresponse()
+        assert response.status == 200 and response.read() == b'ready'
+        # Keep bare TCP open while the server stops. No ClientHello is sent.
+        cleanup.start()
+        cleanup.join(timeout=2)
+        assert not cleanup.is_alive(), 'The fixture shutdown waited for a TLS handshake.'
+        worker.join(timeout=2)
+        assert not worker.is_alive()
+    finally:
+        connection.close()
+        idle.close()
+        if cleanup.ident is None:
+            cleanup.start()
+        cleanup.join(timeout=3)
+        worker.join(timeout=3)
