@@ -108,7 +108,7 @@ def _target(parent: Device, light: Light) -> Device | None:
         return None
     if light.outlet_id is None:
         # A strip parent must never grant control of every outlet.
-        if parent.children or parent.device_type.value not in ("plug", "bulb"):
+        if parent.children or parent.device_type.value not in ("plug", "bulb", "dimmer"):
             return None
         return parent
     if parent.device_type.value != "strip":

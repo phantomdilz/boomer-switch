@@ -35,7 +35,7 @@ Pass those entries and a trusted async resolver to `LightService`.
 The resolver accepts the configured parent `device_id` and returns the matching python-kasa device.
 An `outlet_id` selects one exact child device ID under that parent.
 
-Use `null` only for a standalone bulb or plug.
+Use `null` only for a standalone bulb, plug, or lighting dimmer.
 Other device types are unavailable in this first boundary.
 Reload the service after the owner changes the selection.
 
@@ -59,6 +59,7 @@ The `smoke`, `lights`, and `tooling` tiers also accept ordinary pytest selectors
 Use `--durations 10 --slow-threshold 1` for a duration report.
 
 The runner uses separate temporary paths and parallel workers. The tests never contact real devices.
+The runner rejects overrides for its temporary paths, cache directory, and pytest `addopts`.
 
 ## Open decisions
 - Email delivery method for one-time codes

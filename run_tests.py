@@ -11,6 +11,21 @@ import time
 import uuid
 
 
+def _protect_owned_options(parser: argparse.ArgumentParser, extra: list[str]) -> None:
+    for index, arg in enumerate(extra):
+        if arg == "--" or arg.startswith("--basetemp"):
+            parser.error("The runner owns temporary paths. Do not override --basetemp.")
+        override = None
+        if arg in ("-o", "--override-ini") and index + 1 < len(extra):
+            override = extra[index + 1]
+        elif arg.startswith("--override-ini="):
+            override = arg.split("=", 1)[1]
+        elif arg.startswith("-o") and len(arg) > 2:
+            override = arg[2:]
+        if override is not None and override.split("=", 1)[0].strip() in ("cache_dir", "addopts"):
+            parser.error("The runner owns cache_dir and addopts overrides.")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("tier", choices=("full", "smoke", "lights", "tooling"), nargs="?", default="full")
@@ -25,18 +40,20 @@ def main() -> int:
         parser.error("Use a total limit above 0 and at most 3600 seconds.")
     if any(arg == "-n" or arg.startswith("-n") or arg.startswith("--numprocesses") or arg.startswith("--dist") for arg in extra):
         parser.error("Use --workers to set parallelism.")
+    _protect_owned_options(parser, extra)
     started = time.monotonic()
     print(f"tier={options.tier} workers={options.workers} dist=worksteal start={time.strftime('%Y-%m-%dT%H:%M:%S')}", flush=True)
     root = Path(__file__).resolve().parent
     scratch = root / ".test-runs" / uuid.uuid4().hex
     scratch.mkdir(parents=True)
     try:
-        command = [sys.executable, "-m", "pytest", "-n", str(options.workers), "--dist", "worksteal", "-o", f"cache_dir={scratch}/cache", f"--basetemp={scratch}/tmp"]
+        command = [sys.executable, "-m", "pytest", *extra]
+        # Keep owned options last. PYTEST_ADDOPTS precedes command-line options.
+        command += ["-n", str(options.workers), "--dist", "worksteal", "-o", f"cache_dir={scratch}/cache", f"--basetemp={scratch}/tmp"]
         if options.tier != "full":
             command += ["-m", options.tier]
         if options.durations is not None:
             command += [f"--durations={options.durations}", f"--durations-min={options.slow_threshold}"]
-        command += extra
         process = subprocess.Popen(command, cwd=root, start_new_session=os.name != "nt")
         try:
             while True:

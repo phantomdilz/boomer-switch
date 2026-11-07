@@ -10,6 +10,8 @@ from boomer_switch.lights import CommandDenied, InvalidAllowlist, Light, LightSe
 
 class DeviceType(Enum):
     Plug = "plug"
+    Bulb = "bulb"
+    Dimmer = "dimmer"
     Strip = "strip"
     Unknown = "unknown"
 
@@ -57,8 +59,10 @@ def service(device, lights=None):
 
 
 @pytest.mark.smoke
-def test_explicit_standalone_selection_controls_on_and_off():
+@pytest.mark.parametrize("device_type", [DeviceType.Plug, DeviceType.Bulb, DeviceType.Dimmer])
+def test_explicit_standalone_selection_controls_on_and_off(device_type):
     device = FakeDevice()
+    device.device_type = device_type
     owner, resolved = service(device)
 
     async def scenario():
