@@ -7,6 +7,7 @@ from importlib.resources import files
 from io import BytesIO
 import json
 from pathlib import Path
+import tempfile
 from urllib.parse import urlsplit
 
 from .demo import DemoServer, _DemoHandler
@@ -112,7 +113,7 @@ class _RegistrationHandler(_DemoHandler):
         super()._command(light_id, action)
 
 
-def printable_card(store, directory, base_url):
+def printable_card(store, directory, base_url, *, pdf_template=None):
     import segno
 
     parsed = urlsplit(base_url)
@@ -122,16 +123,34 @@ def printable_card(store, directory, base_url):
     invitation = store.invitation()
     invite_url = f"{base_url}/invite/{invitation['token']}"
     short_url = f"{base_url}/s/{invitation['alias']}"
+    card = directory / "card.html"
+    if pdf_template is not None:
+        from .invitation_pdf import protect_template
+
+        protect_template(pdf_template, card, directory / "card.pdf")
     svg = BytesIO()
     segno.make(invite_url, micro=False, error="m").save(svg, kind="svg", scale=5, xmldecl=False)
-    card = directory / "card.html"
-    card.write_text(
+    markup = (
         '<!doctype html><html lang="en"><meta charset="utf-8"><title>House Lights invitation</title>'
         '<h1>House Lights</h1><p>Local demo invitation</p>' + svg.getvalue().decode("utf-8") +
         '<p>Scan the code or enter this short link:</p><p>' + html.escape(short_url) +
         '</p><p>Keyword words: ' + html.escape(invitation["words"]) +
-        '</p><p>Type the words together without spaces.</p><p>Sample lights only.</p></html>', encoding="utf-8")
-    return {"invite_url": invite_url, "short_url": short_url, "printable_card": str(card.resolve())}
+        '</p><p>Type the words together without spaces.</p><p>Sample lights only.</p></html>')
+    result = {"invite_url": invite_url, "short_url": short_url, "printable_card": str(card.resolve())}
+    if pdf_template is not None:
+        from .invitation_pdf import render_invitation_pdf
+
+        result["printable_pdf"] = str(render_invitation_pdf(pdf_template, directory / "card.pdf", invite_url, short_url))
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=directory, prefix=".card-", suffix=".html", mode="w", encoding="utf-8", delete=False) as file:
+            temporary = Path(file.name)
+            file.write(markup)
+        temporary.replace(card)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return result
 
 
 def main():
@@ -145,6 +164,7 @@ def main():
     actions = operator.add_subparsers(dest="action", required=True)
     card = actions.add_parser("card")
     card.add_argument("--base-url", required=True)
+    card.add_argument("--pdf-template", type=Path)
     actions.add_parser("rotate")
     for name in ("mail", "approve", "revoke", "expire"):
         command = actions.add_parser(name)
@@ -164,7 +184,7 @@ def main():
     else:
         store = RegistrationStore(options.state_dir)
         if options.action == "card":
-            result = printable_card(store, options.state_dir, options.base_url)
+            result = printable_card(store, options.state_dir, options.base_url, pdf_template=options.pdf_template)
         elif options.action == "mail":
             result = store.mailbox(options.email)
         elif options.action == "rotate":
