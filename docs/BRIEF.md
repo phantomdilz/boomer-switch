@@ -2,7 +2,7 @@
 
 ## Summary
 A mobile-friendly web page lets invited guests turn household lights on and off from their phone browser.
-Guests must use the home's main Wi-Fi or guest Wi-Fi.
+Guests use the public website while their request shares the home's observed public internet egress, normally through the main Wi-Fi or guest Wi-Fi.
 They can use a bookmark on return visits without a vendor app, VPN client, shared credentials, or a physical switch.
 
 The guest page groups lights by room with names a visitor recognizes. Each light has large On and Off controls. The page shows the state reported by the device and displays **Unavailable** when it cannot confirm that state.
@@ -23,12 +23,13 @@ A private People page on the owner's website, behind the owner's sign-in:
 
 The home service enforces removal and expiration on the next light command, including from an already-open page. Device credentials and control stay on the home server.
 Before each command, the home service must verify current website permission.
-It must also confirm that the guest uses the home's main Wi-Fi or guest Wi-Fi.
+The website must also match the guest's current server-observed public IPv4 source to a fresh authenticated home connection.
 Each command must fail closed if either check fails or cannot confirm access.
 
 ## Network and device design
-- Only the guest service is published from an always-on home server via Tailscale Funnel (HTTPS, normal browser). The home router's guest-network isolation stays enabled across all mesh nodes. No port forwarding or fixed public IP required.
-- Guest controls require the home's main Wi-Fi or guest Wi-Fi. Remote control is not allowed, even with current owner approval.
+- The public hosted website serves guest registration and controls. An always-on home runner polls it over authenticated outbound HTTPS. No home listener, guest-side computer, inbound port, or fixed public IP is required. Guest-network isolation stays enabled.
+- The website learns the home source from authenticated connections and refreshes it automatically after ISP changes. Guest controls require current permission and matching fresh public egress. This approved check does not prove physical Wi-Fi presence and cannot distinguish a shared NAT or on-site relay.
+- Operations have short expiry, one lease, and fresh authorization immediately before physical dispatch. Unknown outcomes block new mutations until an authorized confirmed read. The browser keeps its ordinary website bookmark and verified session across ISP changes.
 - python-kasa on the main network: read-only discovery first, then the owner selects which bulbs and individual outlets appear; the allowlist is enforced server-side. Pilot devices: HS103 plug, LB130 bulb, KL130 bulb (listed as supported by python-kasa; installed hardware/firmware still need a local check).
 
 ## Milestones
@@ -44,7 +45,6 @@ This project uses the [MIT License](../LICENSE).
 
 ## Validation still required
 
-The exact presence check still requires implementation and validation.
-The presence check must confirm guest access through the main Wi-Fi or guest Wi-Fi while guest-network isolation stays enabled.
-Authenticated HTTPS remains a proposed transport for the website permission check.
-The transport and authentication method still require validation before implementation.
+The real hosted adapter must expose trustworthy client sources rather than a shared frontend proxy address.
+Public IPv4 matching, automatic ISP rotation, live registration mail, and the selected lamp still require private end-to-end validation.
+IPv6, unverified source topology, stale home connections, and unknown permission fail closed in the first outbound pilot.

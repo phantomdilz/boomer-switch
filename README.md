@@ -2,7 +2,7 @@
 
 A mobile-friendly web page that lets invited, owner-approved guests turn household smart lights on and off from a phone browser. No app install, no shared owner credentials, no reaching for a lamp's physical switch.
 
-**Status:** local sample-light demo. Guest access remains planned.
+**Status:** synthetic demos and an outbound-only home runner are available. Hosted integration and physical acceptance remain unverified.
 
 ## Goals
 - Guests on the home's main Wi-Fi or guest Wi-Fi control selected lights from a browser and a bookmark.
@@ -12,9 +12,9 @@ A mobile-friendly web page that lets invited, owner-approved guests turn househo
 
 ## Architecture
 - **Guest web app** — House Lights page and registration flow.
-- **Home service** — always-on home server running [python-kasa](https://github.com/python-kasa/python-kasa) on the main network; holds device credentials and a server-enforced device allowlist. Only the guest service is published via [Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel) (no port forwarding, no fixed public IP).
+- **Home service** — always-on home server running [python-kasa](https://github.com/python-kasa/python-kasa) on the main network. It keeps device credentials and the allowlist private and polls the hosted website over authenticated outbound HTTPS. It opens no guest or public listener.
 - **Owner admin** — private People page on the owner's website, behind the owner's sign-in. The website manages permissions and sends verification codes and owner notices through its existing mail system.
-- **Command checks** — the home service must verify current website permission before each command. It must also confirm that the guest uses the home's main Wi-Fi or guest Wi-Fi. Each command must fail closed if either check fails or cannot confirm access. Remote control is not allowed.
+- **Command checks** — the website requires verified identity, current owner permission, and matching server-observed public IPv4 egress for the guest and home. The home runner rechecks permission, source generation, and expiry immediately before dispatch. Unknown checks fail closed. The website refreshes the home's observed ISP address automatically. Public egress matching does not prove physical Wi-Fi presence.
 
 See [docs/BRIEF.md](docs/BRIEF.md) for the full brief and [AGENTS.md](AGENTS.md) for contribution rules.
 
@@ -142,13 +142,17 @@ The full acceptance script requires an explicit private template path and decode
 
 ## Real guest acceptance blockers
 
+The [outbound one-lamp home connection](docs/PILOT_BACKEND.md) uses the public website and needs no guest-side computer or inbound home route.
+Run `python -m boomer_switch.home_runner --config config.local.home.json` with a private copy of `home.example.json`.
+The old Windows proxy, local TLS server, handoff, and reachability setup are superseded.
+
 The local checks do not establish the physical guest-phone acceptance criteria.
 These integrations and observations remain unavailable:
 
 - A real home runtime that connects the selected allowlist to physical devices through the guarded guest command path.
 - The existing website's authenticated owner mount, live verification mail, and owner notices.
 - A real short redirect and published guest route with the correct private configuration.
-- The website-to-home permission check and a proven main-or-guest Wi-Fi presence check that both fail closed.
+- Trustworthy server-observed guest and home sources, automatic ISP address rotation, and fresh permission checks through the real hosted transport.
 - An ordinary phone test near each mesh node, including physical lamp control and bookmark reuse.
 - Confirmation on the actual router that guest isolation remains enabled across both nodes.
 
@@ -180,7 +184,7 @@ The website hosting and website-to-home permission transport remain unverified a
 Use Python 3.11 or later.
 Install the development dependencies in a local virtual environment with `python -m pip install -e ".[dev]"`.
 Run `python run_tests.py full --workers 2` from that environment.
-The `smoke`, `lights`, `demo`, `registration`, `people`, `cards`, and `tooling` tiers also accept ordinary pytest selectors.
+The `smoke`, `lights`, `demo`, `registration`, `people`, `cards`, `pilot`, and `tooling` tiers also accept ordinary pytest selectors.
 Use `--durations 10 --slow-threshold 1` for a duration report.
 
 The runner uses separate temporary paths and parallel workers. The tests never contact real devices.
@@ -192,6 +196,6 @@ This project uses the [MIT License](LICENSE).
 
 ## Validation still required
 
-The exact method to confirm guest presence on the home's main Wi-Fi or guest Wi-Fi still requires implementation and validation.
-Authenticated HTTPS remains a proposed transport for the website permission check.
-The transport and authentication method still require validation before implementation.
+The approved external route uses authenticated outbound HTTPS and server-observed public IPv4 egress matching.
+The real hosted source topology, ISP refresh, mail, and physical guest acceptance still require validation.
+No live setup or device operation follows from the synthetic test results.
