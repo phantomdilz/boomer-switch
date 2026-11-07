@@ -1,12 +1,10 @@
-"""Run the private one-lamp TLS backend for a separately verified guest producer."""
+"""Retain legacy adapter imports and route the executable entry point to outbound polling."""
 
-import argparse
 import asyncio
 from contextlib import contextmanager
 from dataclasses import dataclass
 import hashlib
 import json
-import logging
 import os
 from http.cookies import SimpleCookie
 from pathlib import Path
@@ -14,7 +12,7 @@ import sqlite3
 import ssl
 import time
 import uuid
-from wsgiref.simple_server import WSGIRequestHandler, WSGIServer, make_server
+from wsgiref.simple_server import WSGIRequestHandler, WSGIServer
 
 from .kasa_pilot import KasaPilotResolver
 from .lights import CommandDenied, LightService, LightState, load_allowlist
@@ -330,33 +328,9 @@ def load_pilot(path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run the private mutually authenticated TLS pilot backend.")
-    parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("--port", type=int, default=0)
-    options = parser.parse_args()
-    if not 0 <= options.port <= 65535:
-        parser.error("Use a valid loopback port.")
-    try:
-        backend, address, tls = load_pilot(options.config)
-    except ValueError as error:
-        parser.error(str(error))
-    provider_log = logging.getLogger("kasa")
-    provider_log.handlers = [logging.NullHandler()]
-    provider_log.propagate = False
-    provider_log.setLevel(logging.CRITICAL + 1)
-    app = PilotApplication(backend)
-    try:
-        with runtime_lock(backend.journal.path):
-            with make_server(address, options.port, app, server_class=_BoundedServer, handler_class=_QuietHandler) as server:
-                server.tls_context = tls
-                print("Private pilot TLS backend ready.", flush=True)
-                server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    except ValueError as error:
-        parser.error(str(error))
-    finally:
-        app.close()
+    from .home_runner import main as outbound_main
+
+    outbound_main()
 
 
 if __name__ == "__main__":

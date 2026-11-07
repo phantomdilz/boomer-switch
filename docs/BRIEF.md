@@ -29,14 +29,16 @@ Each command must fail closed if either check fails or cannot confirm access.
 ## Network and device design
 
 - The external HTTPS website is the guest's only origin for invitations, registration, light controls, and bookmarks.
-- A single home agent makes authenticated outbound polls. There is no inbound home service, callback, guest app, or tunnel requirement.
+- A single home agent makes authenticated outbound polls. There is no inbound home service, callback, guest app, or tunnel requirement. Guest-network isolation stays enabled.
 - The website learns the current home internet address from the direct server-observed source of an authenticated poll.
 - The website automatically replaces that source after an ISP address change. Existing approvals and bookmarks remain valid.
 - A source change or freshness gap invalidates old operation generations. Offline taps never replay after reconnect.
 - This IPv4 pilot requires a validated IPv4-only application origin. It rejects IPv6 sources and never infers a shared IPv6 prefix.
 - Shared internet egress includes home Wi-Fi, wired clients, and a VPN through home. The operator accepted this boundary.
 - A cellular or other remote connection fails closed, even with current owner approval.
+- Unknown effects block new mutations until an authorized confirmed read. Each operation has one lease and fresh authorization before physical dispatch.
 - Device credentials and python-kasa stay on the home server. The owner-selected allowlist remains authoritative.
+- Pilot devices: HS103 plug, LB130 bulb, and KL130 bulb. Installed hardware and firmware still require a local check.
 
 ## Milestones
 1. Discover and label pilot devices
