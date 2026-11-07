@@ -123,6 +123,37 @@ It does not read `.env` or private device configuration, deliver mail, or contac
 It cannot control physical devices.
 Real website permission and local Wi-Fi presence still require validation. Unknown permission or presence must deny any future real command.
 
+## Private PDF handout
+
+Add `--pdf-template PRIVATE_TEMPLATE` to the ordinary card command to generate a PDF with the existing HTML card.
+Install the `pdf` extra for the non-browser runtime dependencies.
+Keep the private template outside tracked files and pass its path explicitly.
+The output is `card.pdf` in the ignored state directory. The blank master stays unchanged.
+
+`python -m boomer_switch.registration_demo operator --state-dir data/registration-demo card --base-url http://localhost:PORT --pdf-template PRIVATE_TEMPLATE`
+
+Both US-Letter pages retain the compact card and full-page sign designs.
+Each has the same invitation QR and its matching typed short address.
+The address uses 2 lines. Type them as one address without spaces.
+The local output is clearly marked as a sample, not a live invitation.
+
+The renderer rejects incompatible templates, linked master/output paths, and addresses that cannot fit legibly.
+The full acceptance script requires an explicit private template path and decodes both rendered QR codes offline.
+
+## Real guest acceptance blockers
+
+The local checks do not establish the physical guest-phone acceptance criteria.
+These integrations and observations remain unavailable:
+
+- A real home runtime that connects the selected allowlist to physical devices through the guarded guest command path.
+- The existing website's authenticated owner mount, live verification mail, and owner notices.
+- A real short redirect and published guest route with the correct private configuration.
+- The website-to-home permission check and a proven main-or-guest Wi-Fi presence check that both fail closed.
+- An ordinary phone test near each mesh node, including physical lamp control and bookmark reuse.
+- Confirmation on the actual router that guest isolation remains enabled across both nodes.
+
+No local demonstration changes the website, router, mesh, guest route, mail system, or physical devices.
+
 ## Private People component
 
 Run `python -m boomer_switch.people_demo serve --state-dir data/people-demo --guest-port 0 --owner-port 0`.
@@ -149,7 +180,7 @@ The website hosting and website-to-home permission transport remain unverified a
 Use Python 3.11 or later.
 Install the development dependencies in a local virtual environment with `python -m pip install -e ".[dev]"`.
 Run `python run_tests.py full --workers 2` from that environment.
-The `smoke`, `lights`, `demo`, `registration`, `people`, and `tooling` tiers also accept ordinary pytest selectors.
+The `smoke`, `lights`, `demo`, `registration`, `people`, `cards`, and `tooling` tiers also accept ordinary pytest selectors.
 Use `--durations 10 --slow-threshold 1` for a duration report.
 
 The runner uses separate temporary paths and parallel workers. The tests never contact real devices.
