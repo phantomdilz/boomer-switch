@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>House Lights · People</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="people.js" defer></script>
+</head>
+<body>
+<main>
+  <header class="page-header">
+    <span class="demo-label">Owner · People</span>
+    <h1>People</h1>
+    <p>Manage access to House Lights.</p>
+  </header>
+  <p id="people-status" role="status">Checking people…</p>
+  <button id="refresh-people" type="button">Refresh requests</button>
+  <section>
+    <h2>Add person</h2>
+    <p>Approve an email in advance. The guest must still verify that inbox.</p>
+    <form id="add-person-form">
+      <label for="add-email">Email</label>
+      <input id="add-email" type="email" maxlength="254" autocomplete="off" required>
+      <button id="add-person" type="submit">Add person</button>
+    </form>
+  </section>
+  <section><h2>Pending requests</h2><div id="pending-people"></div></section>
+  <section>
+    <h2>Approved people</h2>
+    <p id="date-help">The last day is inclusive in this device's time zone. Access ends at midnight after that day.</p>
+    <p id="time-zone"></p>
+    <p>After access expires, the guest must verify email again if you restore access.</p>
+    <div id="approved-people"></div>
+  </section>
+</main>
+</body>
+</html>

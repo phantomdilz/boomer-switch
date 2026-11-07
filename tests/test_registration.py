@@ -160,7 +160,7 @@ def test_valid_new_card_allows_expired_guest_to_request_fresh_approval(tmp_path)
     original = pending(store)
     store.operator("approve", EMAIL)
     store.operator("expire", EMAIL)
-    assert store.status(original) == "denied"
+    assert store.status(original) == "anonymous"
     current = store.browser(store.invitation()["token"], existing=original)
     assert current != original
     now[0] += 31
