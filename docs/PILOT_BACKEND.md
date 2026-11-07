@@ -103,7 +103,8 @@ Repeated connection or acknowledgement failures produce one plain operator messa
 
 The Windows guest proxy, Wi-Fi attachment producer, browser handoff, local TLS server, and reachability diagnostic are superseded.
 They are not part of the active entry point and require no setup on a guest-side computer.
-Their imported components remain temporarily available for the pending website integration's older callers and synthetic regression tests.
+Their imported components remain available for isolated historical callers and synthetic regression tests.
+The production website factory exposes the outbound rendezvous and same-origin controls.
 The old `pilot.example.json` and `guest.example.json` are legacy fixtures, not current setup instructions.
 
 Retained tests cover exact Kasa identity, zero SDK retries, target-bound journals, unknown outcomes, and old adapter isolation.

@@ -16,14 +16,17 @@ The operator accepted that boundary. A cellular or other remote source fails clo
 This pilot uses an IPv4-only application origin.
 Configure and verify its IPv4 DNS route for both the browser and home agent before a live test.
 An AAAA record, IPv6 HTTPS/SVCB hint, or alternate IPv6 route must not bypass this requirement.
+
 The home client uses IPv4. The website rejects every IPv6 source, including IPv4-mapped IPv6.
 It never infers a shared IPv6 prefix from one address. There is no automatic address-family fallback.
+
 A later IPv6 design needs its own verified source contract.
 
 Use a direct host connection for this namespace.
 The PHP bridge reads server `REMOTE_ADDR`, not a browser field or forwarded header.
 Its private `direct_source` setting must remain false until the operator verifies the server's peer semantics.
 A CDN, reverse proxy, or server module that rewrites the peer makes this topology unsupported.
+
 Forwarded-source headers disable device authority, even when the remaining request authenticates.
 Do not copy `X-Forwarded-For`, `Forwarded`, or another client header into the peer field.
 An unsupported host can serve registration, but it cannot authorize light state or commands.
@@ -39,7 +42,9 @@ Install the `website` extra in a private virtual environment.
 Put `hosting/index.php` only inside the dedicated namespace.
 Route every path within that namespace to that bridge.
 PHP 8.2 must support `proc_open` with an array command.
+
 Each request starts one private Python CGI process. No persistent Python listener is required.
+
 The bridge bounds bodies, output, and process duration. It discards provider error text.
 
 Keep both configuration files and the canonical SQLite directory outside the document root.
@@ -56,7 +61,7 @@ That file returns these fields:
 - `direct_source`: true only after the direct-source hosting check above.
 
 The validator must check the existing owner session on every private request.
-A nonempty cookie or client identity header is not sufficient.
+A nonempty cookie or client identity header is not enough.
 The PHP bridge sends only valid component cookies to Python.
 The existing website's sign-in credential stays inside its current validator.
 
@@ -83,13 +88,15 @@ For SMTP, `mail` holds `transport: smtp`, `host`, numeric `port`, `sender`, and 
 It can also hold `username`, `password`, and Boolean `implicit_tls`.
 SMTP always uses certificate-verified TLS. Its socket operations have a 5-second timeout each.
 The PHP process limit provides the outer deadline.
+
 For the existing local mail facility, use `transport: sendmail`, an absolute `executable`, `sender`, and `owner`.
 Do not provision a new provider.
 
 Registration retains its per-email and global send limits.
 Each mail row has one durable claim and stable Message-ID.
 Only one validated recipient enters the explicit mail envelope.
-Code plaintext leaves durable storage before the external attempt.
+Code plaintext leaves durable storage before the external send.
+
 Expired codes and obsolete notices never enter the transport.
 Uncertain deliveries remain `unknown` and never retry automatically.
 Check the mail provider's authoritative result before a manual recovery.
@@ -107,6 +114,7 @@ Do not restore an old database over accepted People decisions.
 Its body is `{agent_id, sequence, request_id, light}` with canonical UUIDs and a durable increasing sequence.
 The first valid poll binds the single agent identity.
 Another agent or a lower sequence cannot replace its state.
+
 The `light` field holds only the owner-selected public `light_id`, `name`, and `room`.
 Only an approved matching-source browser can receive these labels.
 An exact same-source retry does not extend freshness.
@@ -115,7 +123,8 @@ The website atomically updates the authenticated source and connection generatio
 An address change or a gap of at least 6 seconds starts a new generation.
 An authenticated source mismatch on another agent request retires the old epoch until a fresh ordered poll.
 An observed guest source change invalidates that guest's open assignments, even after a return to the old source.
-Returning from source A to B and then A does not restore A's old generation.
+
+After home returns from A through B to A, its old generation remains invalid.
 An old or reordered poll cannot restore the old source.
 A queued tap expires after 8 seconds and never returns to the queue.
 A reconnect cannot revive a tap from before a freshness gap, even on the same address.
@@ -137,6 +146,7 @@ An outcome is `{status, state}` with a bounded confirmed or unavailable result.
 An exact result retry is accepted. A conflicting result fails.
 A bound result can record truth after a later address change, but it grants no new operation.
 Guests cannot read an old generation's result as current state.
+
 Late receipts remain truth, but state freshness uses the operation issue time, not the receipt arrival.
 Expired read rows receive a 60-second grace period, then the website removes them.
 The runner drops expired read receipts. Mutation deduplication and unresolved effects remain durable.
@@ -155,6 +165,7 @@ It pauses while hidden and requests fresh confirmed state at least every 5 secon
 The first visit or reconnect can wait up to the configured idle interval, plus bounded state-query time.
 The website waits for a demand-aware fast poll before it accepts work.
 The same page shows that wait and automatically checks again. The guest needs no reload.
+
 Offline taps do not enter a durable queue.
 Unavailable or uncertain state disables On and Off until a fresh read confirms state.
 
@@ -168,7 +179,7 @@ Unavailable or uncertain state disables On and Off until a fresh read confirms s
 6. Keep People pages and actions behind the current owner validator.
 7. Suppress or redact full request targets for invitation and short-link paths before live links.
 8. Verify TLS, denied cellular requests, and forged-header rejection before external effects.
-9. Perform mail and device trials only under their explicit scoped authority.
+9. Run mail and device trials only under their explicit scoped authority.
 
 For rollback, remove the new namespace route or restore the previous reviewed release pointer.
 Keep the canonical database, private configuration, and accepted operation receipts.
