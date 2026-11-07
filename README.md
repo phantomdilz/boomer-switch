@@ -142,7 +142,8 @@ The full acceptance script requires an explicit private template path and decode
 
 ## Real guest acceptance blockers
 
-The [private pilot backend milestone](docs/PILOT_BACKEND.md) adds guarded provider and website-grant adapters plus a finite harmless phone-to-spare reachability check.
+The [private one-lamp pilot](docs/PILOT_BACKEND.md) adds the Windows guest entry point, guarded home backend, and real website handoff contract.
+Its double-clickable Windows reachability check needs no Python installation. Private network and website integration checks remain required before live control.
 Its guest-side proof producer, browser session handoff, certificates, and real hosting remain open.
 
 The local checks do not establish the physical guest-phone acceptance criteria.
