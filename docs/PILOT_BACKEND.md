@@ -1,8 +1,8 @@
-# Private one-lamp backend milestone
+# Private one-lamp pilot
 
-This milestone supplies the home backend, website permission adapter, and harmless reachability check.
-It does not supply the guest-side Wi-Fi proof producer, its HTTPS listener, or a browser sign-in handoff.
-Do not enable real guest control before those parts pass their preflights under separate operator authority.
+This implementation supplies the home backend, Windows guest entry point, website permission adapter, and harmless reachability check.
+The guest entry point uses the production website's browser-bound sign-in handoff.
+Do not enable real guest control before the separate website integration and private network preflights pass under operator authority.
 No deployment, certificate installation, live provider call, or physical switch test forms part of this implementation.
 
 ## First check: phone-to-spare reachability
@@ -58,32 +58,81 @@ Only these application routes exist:
 - `POST /api/lights/LIGHT_ID` accepts only `{"action":"on","operation_id":"CANONICAL_UUID"}` or the corresponding `off` action.
 
 There is no owner page, fake sign-in, demo mailbox, registration endpoint, or filesystem route on this backend.
-No guest UI is published by this milestone.
+The guest browser page runs only on the separate Windows entry point.
 Read-only targeted discovery treats `device_host` as a hint, then checks the exact stable device ID, type, and lack of child outlets.
 
 All provider queries use zero SDK retries. Discovery and disconnect have separate bounded timeouts.
 State comes from a fresh device read. A failed or ambiguous physical command returns Unavailable without automatic retry.
 
-## Required guest-producer contract
+## Windows guest entry point
 
 A client certificate authenticates the producer, not the phone's Wi-Fi connection.
-The future producer must bind exclusively to the selected physical guest wireless interface and address.
-Before each forward, it must verify the pinned adapter and current approved Wi-Fi, directly attached client subnet, and absence of forwarding or overlay ingress.
-It must deny service if the adapter roams, disappears, changes identity, or loses the expected address.
+The producer binds exclusively to the selected physical guest wireless address.
+Before each forward, it checks the pinned adapter GUID and index, SSID, BSSID, private address, subnet, and direct neighbor.
+It requires a physical active adapter and an on-link route with no competing specific route.
+All IPv4 interfaces must disable forwarding and weak-host send and receive.
+Peers that match a configured next-hop router or default gateway on the selected adapter are denied.
+
+The native WLAN query runs last. It requires an infrastructure connection with WPA2 or WPA3 authentication.
+
+It denies service if the adapter roams, disappears, changes identity, or loses the expected address.
 Another interface with the same address must not inherit service.
 An IP address, a browser connection-type hint, or an untrusted request header is not enough proof.
 
 The producer must keep its dedicated TLS client key exclusive and reject management paths.
-It must discard client forwarding, deadline, and presence headers.
-It sets `X-Pilot-Deadline` itself before the authenticated forward, normally 6 seconds ahead.
+It rejects client forwarding, deadline, authorization, and presence headers.
+It sets `X-Pilot-Deadline` itself before the authenticated forward, 6 seconds after the proof query starts.
+The proof query must finish within 4 seconds. No device request waits in a queue.
+
+If a native WLAN call stalls, the request fails within 4 seconds and no further proof worker starts until it returns.
+Its late result cannot authorize a later request. A stuck native service requires an operator check or process restart.
+
 The home consumer rejects a lifetime longer than 8 seconds, an expired deadline, and queued commands whose deadline expires before dispatch.
 The guest producer, home backend, and website host require compatible wall clocks.
 
 The backend checks the accepted-request deadline and a fresh website grant again at the physical dispatch boundary.
 Busy operations are rejected instead of queued. A command already accepted in good faith can finish within its bounded lifetime.
 
-The spare uses Windows. Its trustworthy browser TLS certificate, exact wireless adapter, peer isolation behavior, and private home reachability still need preflight checks.
-The guest listener and Windows proof implementation remain open for the next bounded work unit.
+Copy `guest.example.json` to `config.local.guest.json` on the Windows spare and replace each placeholder privately.
+Use an approved browser-trusted certificate for the exact `origin`, with DNS that resolves to the selected Wi-Fi address.
+Keep the dedicated home client key and website service key readable only by the service account.
+The home service must trust only this dedicated client certificate and its pinned fingerprint.
+
+```text
+python -m boomer_switch.guest_proxy --config config.local.guest.json
+```
+
+The listener port comes from `origin`. No wildcard or overlay listener is created.
+The page shows one lamp, explicit On and Off buttons, confirmed state, and a 10-second read interval while visible.
+Each click has a new operation ID. Commands have no automatic retry.
+
+### Real website handoff
+
+Configure the production website's fixed `home_entry` as this origin's `/auth/start` and its fixed callback as `/auth/callback`.
+The entry point redirects to `website_guest_url#challenge=...&state=...` with a browser-bound pending cookie.
+The real website requires verified inbox ownership and current owner approval before it issues its one-use code.
+The callback checks the pending cookie and state, then posts `{code,challenge,request_id}` to the explicit HTTPS `website_exchange_url`.
+The authenticated response must contain `{session,expires,request_id}`, a HOME-scoped 64-character hex token, and an expiry within 24 hours.
+
+The entry point sets a Secure, HttpOnly, SameSite=Strict guest cookie and removes the code from the browser URL.
+It does not copy a website cookie or accept a manually supplied pilot credential.
+
+Pending handoffs expire after 120 seconds and do not survive a process restart.
+Completed browser sessions still depend on the website's persisted map and a fresh grant for every read and command.
+The website adapter is a separate component. These synthetic tests do not establish production hosting or live mail delivery.
+
+### Required private preflights
+
+Verify phone-to-spare reachability, browser certificate trust, exact WLAN identity, native-query permissions, and private home mTLS reachability.
+Windows can deny WLAN information when location access is unavailable. The service fails closed and does not change that setting.
+Exclude proxy ARP, untrusted relays, forwarding, and VPN paths that make remote clients appear directly attached.
+The producer proves its Windows attachment and a direct local peer. It cannot detect a separate trusted-looking application relay elsewhere on the LAN.
+
+The approved deployment profile must exclude such relays. IP addresses alone do not prove phone presence.
+
+The real website's sign-in, mail, fixed callback, authorization map, HTTPS grants, and clocks require integration checks before any physical command.
+No certificate provisioning, firewall rule, router change, deployment, or live phone/device test is included here.
+If any required proof is missing, access remains unavailable.
 
 ## Website permission endpoint
 
@@ -131,7 +180,7 @@ Unknown or interrupted effects also block new IDs for that lamp across restart.
 Only an authenticated, authorized, confirmed device read clears that unresolved barrier.
 Pre-dispatch permission denial does not become an unknown physical effect.
 
-Stop the backend with Ctrl+C. Stop the future guest producer separately before changing its network or certificates.
+Stop both processes with Ctrl+C before changing their network or certificates.
 The lamp keeps its current state after the backend stops.
 
 Keep the journal after a timeout, transport loss, or process interruption. Do not delete it to bypass an unresolved operation.
