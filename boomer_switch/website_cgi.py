@@ -7,12 +7,12 @@ from pathlib import Path
 import sys
 
 from .registration import RegistrationStore
+from .home_rendezvous import HomeRendezvous
 from .website import WebsiteApplication
-from .website_handoff import WebsiteHandoff
 from .website_mail import WebsiteMail, SMTPTransport, SendmailTransport
 
 
-def create_application(config, *, grant_app=None):
+def create_application(config):
     state = Path(config["state_directory"])
     if not state.is_absolute():
         raise ValueError("Configure an absolute private state directory.")
@@ -25,22 +25,21 @@ def create_application(config, *, grant_app=None):
     else:
         raise ValueError("Configure the website mail transport.")
     mail = WebsiteMail(store, transport, mail_config["sender"], mail_config["owner"])
-    handoff = WebsiteHandoff(store, config["service_key"], config["home_callback"], config["home_entry"])
+    rendezvous = HomeRendezvous(store, config["service_key"], idle_poll_seconds=config.get("idle_poll_seconds", 15))
     return WebsiteApplication(store, mail, origin=config["origin"], mount=config["mount"],
-                              owner_identity=config["owner_identity"], grant_app=grant_app, handoff=handoff)
+                              owner_identity=config["owner_identity"], grant_app=None, rendezvous=rendezvous)
 
 
 def main():
     try:
         config = json.loads(Path(os.environ["BOOMER_PRIVATE_CONFIG"]).read_text())
-        from .website_grants import create_website_grant_application
         app = create_application(config)
-        app.grant_app = create_website_grant_application(app.store.path, config["service_key"])
         length = int(os.environ.get("CONTENT_LENGTH") or 0)
         if not 0 <= length <= 4096:
             raise ValueError
-        environ = {key: os.environ[key] for key in ("REQUEST_METHOD", "PATH_INFO", "SCRIPT_NAME", "CONTENT_TYPE", "CONTENT_LENGTH", "REMOTE_USER", "HTTP_COOKIE", "HTTP_ORIGIN", "HTTP_X_CSRF_TOKEN", "HTTP_AUTHORIZATION") if key in os.environ}
+        environ = {key: os.environ[key] for key in ("REQUEST_METHOD", "PATH_INFO", "SCRIPT_NAME", "CONTENT_TYPE", "CONTENT_LENGTH", "REMOTE_USER", "HTTP_COOKIE", "HTTP_ORIGIN", "HTTP_X_CSRF_TOKEN", "HTTP_AUTHORIZATION", "REMOTE_ADDR") if key in os.environ}
         environ["wsgi.url_scheme"] = "https" if os.environ.get("BOOMER_HTTPS") == "1" else "http"
+        environ["boomer.direct_peer"] = os.environ.get("BOOMER_DIRECT_SOURCE") == "1"
         environ["wsgi.input"] = BytesIO(sys.stdin.buffer.read(length))
         response = []
         def start_response(status, headers, exc_info=None):
