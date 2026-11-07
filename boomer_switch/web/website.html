@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>House Lights access</title><link rel="stylesheet" href="style.css"><script src="website.js" defer></script></head>
+<body><main><h1>House Lights</h1><p id="status" role="status">Checking access</p>
+<form id="details" hidden><label for="name">Name</label><input id="name" autocomplete="name" maxlength="80" required>
+<label for="email">Email</label><input id="email" type="email" autocomplete="email" maxlength="254" required><button>Send code</button></form>
+<form id="verification" hidden><label for="code">Verification code</label><input id="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required><button>Verify code</button><button type="button" id="resend">Send new code</button></form>
+<button id="connect" hidden>Open home controls</button><p>Light controls require the home Wi-Fi.</p></main></body></html>

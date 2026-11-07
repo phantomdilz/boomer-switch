@@ -63,3 +63,12 @@ After expiration, restoration requires fresh inbox proof and invalidates session
 
 The local demonstration shares SQLite only to verify the permission consumer through ordinary guest commands.
 The real website-to-home transport, host authentication configuration, and Wi-Fi presence check still require integration and validation.
+
+## Hosted registration and PHP integration
+
+[Hosted registration install](HOSTED_REGISTRATION.md) describes the production guest routes, existing mail transport, and private People adapter.
+It also defines the browser-bound exchange for home sessions and the scoped PHP-to-CGI installation.
+This adapter persists owner session tokens for per-request Python processes.
+It still requires the current website owner identity on every private request.
+The existing standalone WSGI factory above keeps its original in-process session contract.
+Host validation and an authorized acceptance demo remain required before deployment.
