@@ -123,12 +123,33 @@ It does not read `.env` or private device configuration, deliver mail, or contac
 It cannot control physical devices.
 Real website permission and local Wi-Fi presence still require validation. Unknown permission or presence must deny any future real command.
 
+## Private People component
+
+Run `python -m boomer_switch.people_demo serve --state-dir data/people-demo --guest-port 0 --owner-port 0`.
+The command prints separate loopback owner and guest addresses.
+The owner component uses the `/house-lights` prefix and keeps its page, assets, and API inside that prefix.
+Guest routes do not expose People pages, data, or actions.
+
+Use `python -m boomer_switch.people_demo sign-in --state-dir data/people-demo --owner-url OWNER_URL` for a one-time synthetic sign-in link.
+Replace `OWNER_URL` with the printed owner address, including its prefix.
+Keep that link private. The fixture does not use website credentials.
+The existing registration operator's card and fake-mail commands use the same state directory and the printed guest address.
+
+People supports verified pending approval or denial, email preapproval, removal, and optional end dates.
+Preapproved guests still require inbox proof. Stale actions return a conflict and preserve the accepted record.
+The selected last day includes that whole day in the displayed browser time zone.
+After expiration, restored permission requires fresh inbox proof.
+
+The reusable WSGI hosting adapter validates trusted `REMOTE_USER` against a configured owner identity and binds CSRF to a server-side owner session.
+See [the owner hosting contract](docs/OWNER_HOSTING.md) for HTTPS, routing, session, and integration requirements.
+The website hosting and website-to-home permission transport remain unverified and undeployed. The local demonstration controls only synthetic devices.
+
 ## Synthetic tests
 
 Use Python 3.11 or later.
 Install the development dependencies in a local virtual environment with `python -m pip install -e ".[dev]"`.
 Run `python run_tests.py full --workers 2` from that environment.
-The `smoke`, `lights`, `demo`, `registration`, and `tooling` tiers also accept ordinary pytest selectors.
+The `smoke`, `lights`, `demo`, `registration`, `people`, and `tooling` tiers also accept ordinary pytest selectors.
 Use `--durations 10 --slow-threshold 1` for a duration report.
 
 The runner uses separate temporary paths and parallel workers. The tests never contact real devices.
