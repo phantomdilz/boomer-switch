@@ -63,9 +63,29 @@ class WebsiteApplication:
         except Exception:
             return ""
 
+    def _bootstrap(self, raw):
+        with self.store._transaction() as db:
+            now = self.store.clock()
+            if db.execute("SELECT 1 FROM sessions WHERE id=? AND expires>?", (_digest(raw), now)).fetchone():
+                return raw, False
+            db.execute("DELETE FROM challenges WHERE session IN (SELECT id FROM sessions WHERE expires<=?)", (now,))
+            db.execute("DELETE FROM sessions WHERE expires<=?", (now,))
+            if db.execute("SELECT COUNT(*) FROM sessions WHERE verified=0").fetchone()[0] >= 1000:
+                raise AccessDenied("Registration is busy. Try again later.")
+            raw = secrets.token_urlsafe(32)
+            db.execute("INSERT INTO sessions(id,expires) VALUES (?,?)", (_digest(raw), now+self.store.SESSION_SECONDS))
+            return raw, True
+
     @staticmethod
     def _csrf(raw):
         return hashlib.sha256(("website-csrf:" + raw).encode()).hexdigest()
+
+    def _access(self, raw):
+        status = self.store.status(raw)
+        result = {"status": status, "csrf": self._csrf(raw)}
+        if status == "approved" and self.handoff is not None:
+            result["home_entry"] = self.handoff.entry
+        return result
 
     def _body(self, environ, raw):
         if environ.get("HTTP_ORIGIN") != self.origin:
@@ -108,20 +128,33 @@ class WebsiteApplication:
                 status, payload = "303 See Other", {}
                 headers.append(("Location", self.mount + "/invite/" + token))
             elif method == "GET" and path.startswith("/invite/"):
-                raw = self.store.browser(path[8:], existing=raw)
+                # Finish the invitation after a same-origin API call restores Strict cookies.
+                token = path[8:]
+                if not token or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for c in token):
+                    raise AccessDenied("Invitation unavailable.")
                 status, payload = "303 See Other", {}
-                headers += [("Location", self.mount + "/guest"), ("Set-Cookie", self._cookie("bs_session", raw))]
+                headers.append(("Location", self.mount + "/guest#invitation=" + token))
             elif method == "GET" and path in ("/", "/guest"):
-                if self.store.status(raw) == "anonymous":
-                    raw = self.store.browser()
-                    headers.append(("Set-Cookie", self._cookie("bs_session", raw)))
+                # A cross-site navigation can suppress a Strict cookie.
+                # Bootstrap only after the page makes its same-origin API call.
                 content_type = "text/html; charset=utf-8"
                 payload = files("boomer_switch").joinpath("web", "website.html").read_bytes()
             elif method == "GET" and path in ("/website.js", "/style.css"):
                 content_type = "text/javascript; charset=utf-8" if path.endswith(".js") else "text/css; charset=utf-8"
                 payload = files("boomer_switch").joinpath("web", path[1:]).read_bytes()
             elif method == "GET" and path == "/api/access":
-                payload = {"status": self.store.status(raw), "csrf": self._csrf(raw)}
+                raw, issued = self._bootstrap(raw)
+                if issued:
+                    headers.append(("Set-Cookie", self._cookie("bs_session", raw)))
+                payload = self._access(raw)
+            elif method == "POST" and path == "/api/invite":
+                body = self._body(environ, raw)
+                if set(body) != {"invitation"}:
+                    raise ValueError
+                new_raw = self.store.browser(body["invitation"], existing=raw)
+                if new_raw != raw:
+                    headers.append(("Set-Cookie", self._cookie("bs_session", new_raw)))
+                payload = self._access(new_raw)
             elif method == "POST" and path == "/api/handoff" and self.handoff is not None:
                 body = self._body(environ, raw)
                 if set(body) != {"challenge", "state"}:
@@ -138,7 +171,7 @@ class WebsiteApplication:
                 else:
                     raise ValueError
                 self.mail.deliver()
-                payload = {"status": self.store.status(raw), "csrf": self._csrf(raw)}
+                payload = self._access(raw)
             else:
                 status, payload = "404 Not Found", {"error": "Page unavailable."}
         except AccessDenied as error:

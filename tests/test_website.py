@@ -38,7 +38,7 @@ def invoke(app, path, method='GET', body=None, cookie='', csrf='', **extra):
 
 @pytest.fixture
 def hosted(tmp_path):
-    store = RegistrationStore(tmp_path)
+    store = RegistrationStore(tmp_path, mode="production")
     transport = FakeTransport()
     mail = WebsiteMail(store, transport, 'sender@example.invalid', 'owner@example.invalid')
     handoff = WebsiteHandoff(store, 'k'*40, 'https://home.invalid/callback')
@@ -49,9 +49,14 @@ def hosted(tmp_path):
 def guest(hosted):
     app, store, transport = hosted
     status, headers, _ = invoke(app, '/invite/'+store.invitation()['token'])
-    assert status == 303 and headers['Location'] == '/house-lights/guest'
-    cookie = headers['Set-Cookie'].split(';')[0]
-    csrf = json.loads(invoke(app, '/api/access', cookie=cookie)[2])['csrf']
+    assert status == 303 and headers['Location'].startswith('/house-lights/guest#invitation=')
+    assert 'Set-Cookie' not in headers
+    _, bootstrap, payload = invoke(app, '/api/access')
+    cookie = bootstrap['Set-Cookie'].split(';')[0]
+    csrf = json.loads(payload)['csrf']
+    _, headers, payload = invoke(app, '/api/invite', 'POST', {'invitation':store.invitation()['token']}, cookie, csrf)
+    cookie = headers.get('Set-Cookie', cookie).split(';')[0]
+    csrf = json.loads(payload)['csrf']
     return cookie, csrf
 
 
@@ -145,12 +150,15 @@ def test_smtp_uses_certificate_verified_tls_before_login_and_closes_on_send(monk
             calls.append('tls')
         def login(self, username, password):
             calls.append('login')
-        def send_message(self, message):
+        def send_message(self, message, **envelope):
+            assert envelope == {"from_addr": "sender@example.invalid", "to_addrs": ["guest@example.invalid"]}
             calls.append('send')
         def close(self):
             calls.append('close')
     monkeypatch.setattr(website_mail.smtplib, 'SMTP', SMTP)
-    website_mail.SMTPTransport('smtp.invalid', 587, 'user', 'secret').send(EmailMessage())
+    message = EmailMessage()
+    message['From'], message['To'] = 'sender@example.invalid', 'guest@example.invalid'
+    website_mail.SMTPTransport('smtp.invalid', 587, 'user', 'secret').send(message)
     assert calls == [('connect', 5), 'tls', 'login', 'send', 'close']
 
 
@@ -161,10 +169,269 @@ def test_sendmail_has_absolute_fixed_command_timeout_and_no_shell(monkeypatch):
     calls = []
     monkeypatch.setattr(website_mail.subprocess, 'run', lambda *args, **kwargs: calls.append((args, kwargs)))
     executable = str(Path('sendmail').resolve())
-    website_mail.SendmailTransport(executable).send(EmailMessage())
+    message = EmailMessage()
+    message['From'], message['To'] = 'sender@example.invalid', 'guest@example.invalid'
+    website_mail.SendmailTransport(executable).send(message)
     args, kwargs = calls[0]
-    assert args[0] == [executable, '-i', '-t']
+    assert args[0] == [executable, '-i', '-f', 'sender@example.invalid', '--', 'guest@example.invalid']
     assert kwargs['timeout'] == 5 and kwargs['check'] is True
     assert 'shell' not in kwargs
     with pytest.raises(ValueError):
         website_mail.SendmailTransport('sendmail')
+
+
+@pytest.mark.parametrize('email', ['postmaster,guest@example.invalid', 'Guest <guest@example.invalid>', 'guest@example.invalid;other', 'guest(comment)@example.invalid', 'guest@example.invalid\r\nBcc: extra@example.invalid'])
+def test_single_mailbox_validation_rejects_header_recipient_expansion(hosted, email):
+    app, _, transport = hosted
+    cookie, csrf = guest(hosted)
+    assert invoke(app, '/api/register', 'POST', {'name':'Guest','email':email}, cookie, csrf)[0] == 403
+    assert not transport.messages
+    with pytest.raises(ValueError):
+        WebsiteMail(app.store, transport, email, 'owner@example.invalid')
+    with pytest.raises(ValueError):
+        WebsiteMail(app.store, transport, 'sender@example.invalid', email)
+
+
+def test_cross_site_guest_bootstrap_does_not_replace_approved_strict_cookie(hosted):
+    app, store, _ = hosted
+    cookie, _ = verify(hosted)
+    store.operator('approve', 'guest@example.invalid')
+    status, headers, _ = invoke(app, '/guest', HTTP_SEC_FETCH_SITE='cross-site')
+    assert status == 200 and 'Set-Cookie' not in headers
+    status, headers, payload = invoke(app, '/api/access', cookie=cookie)
+    assert status == 200 and json.loads(payload)['status'] == 'approved'
+    assert 'Set-Cookie' not in headers
+    status, headers, payload = invoke(app, '/api/access')
+    assert status == 200 and 'Set-Cookie' in headers
+    assert json.loads(payload)['status'] == 'anonymous'
+
+
+def test_live_transport_refuses_existing_demo_mail(tmp_path):
+    store = RegistrationStore(tmp_path)
+    raw = store.browser(store.invitation()['token'])
+    store.start(raw, 'Demo', 'demo@example.invalid')
+    transport = FakeTransport()
+    with pytest.raises(ValueError, match='Historical demo mail'):
+        WebsiteMail(store, transport, 'sender@example.invalid', 'owner@example.invalid')
+    assert not transport.messages
+
+
+def test_expired_code_is_discarded_without_external_send(hosted):
+    app, store, transport = hosted
+    raw = store.browser(store.invitation()['token'])
+    store.start(raw, 'Guest', 'guest@example.invalid')
+    now = store.clock()
+    store.clock = lambda: now + 301
+    assert app.mail.deliver() == 0 and not transport.messages
+    with store._transaction() as db:
+        assert db.execute('SELECT state FROM mail_delivery').fetchone()[0] == 'discarded'
+        assert db.execute('SELECT code FROM mailbox').fetchone()[0] is None
+
+
+def test_anonymous_bootstrap_reuses_prunes_and_bounds_public_state(hosted):
+    app, store, _ = hosted
+    _, headers, _ = invoke(app, '/api/access')
+    cookie = headers['Set-Cookie'].split(';')[0]
+    assert 'Set-Cookie' not in invoke(app, '/api/access', cookie=cookie)[1]
+    with store._transaction() as db:
+        assert db.execute('SELECT COUNT(*) FROM sessions').fetchone()[0] == 1
+        db.executemany('INSERT INTO sessions(id,expires) VALUES (?,?)', [(str(i), store.clock()+100) for i in range(999)])
+    assert invoke(app, '/api/access')[0] == 403
+    now = store.clock()
+    store.clock = lambda: now + 86401
+    assert invoke(app, '/api/access')[0] == 200
+    with store._transaction() as db:
+        assert db.execute('SELECT COUNT(*) FROM sessions').fetchone()[0] == 1
+
+
+def test_production_store_rejects_demo_preapproval_and_demo_rejects_live_state(tmp_path):
+    demo = RegistrationStore(tmp_path / 'demo')
+    demo.change_person('preapprove', 'guest@example.invalid', None)
+    with pytest.raises(ValueError):
+        RegistrationStore(tmp_path / 'demo', mode='production')
+    live = RegistrationStore(tmp_path / 'live', mode='production')
+    with pytest.raises(ValueError):
+        RegistrationStore(tmp_path / 'live')
+    assert live.people() == []
+
+
+def test_valid_card_cross_site_return_preserves_approved_session(hosted):
+    app, store, _ = hosted
+    cookie, csrf = verify(hosted)
+    store.operator('approve', 'guest@example.invalid')
+    status, headers, _ = invoke(app, '/invite/'+store.invitation()['token'], HTTP_SEC_FETCH_SITE='cross-site')
+    assert status == 303 and 'Set-Cookie' not in headers
+    result = invoke(app, '/api/invite', 'POST', {'invitation':store.invitation()['token']}, cookie, csrf)
+    assert result[0] == 200 and 'Set-Cookie' not in result[1]
+    assert json.loads(result[2])['status'] == 'approved'
+
+
+def test_public_recovery_does_not_disclose_approval_membership(hosted):
+    app, store, transport = hosted
+    store.change_person('preapprove', 'approved@example.invalid', None)
+    outcomes = []
+    for email in ('approved@example.invalid', 'unknown@example.invalid'):
+        _, headers, payload = invoke(app, '/api/access')
+        cookie = headers['Set-Cookie'].split(';')[0]
+        csrf = json.loads(payload)['csrf']
+        start = invoke(app, '/api/register', 'POST', {'name':'Guest','email':email}, cookie, csrf)
+        wrong = invoke(app, '/api/verify', 'POST', {'code':'wrong'}, cookie, csrf)
+        resend = invoke(app, '/api/resend', 'POST', {}, cookie, csrf)
+        outcomes.append((start[0],json.loads(start[2])['status'],wrong[0],wrong[2],resend[0],resend[2]))
+    assert outcomes[0] == outcomes[1]
+    assert len(transport.messages) == 1 and transport.messages[0]['To'] == 'approved@example.invalid'
+
+
+def test_actual_cgi_entry_uses_fake_mail_and_composes_reference_grants(tmp_path):
+    import os
+    from pathlib import Path
+    import subprocess
+    import sys
+    import re
+    from urllib.parse import urlsplit, parse_qs
+    from boomer_switch.registration import RegistrationStore
+    config = {'state_directory':str(tmp_path / 'state'), 'origin':'https://site.invalid', 'mount':'/house-lights',
+              'owner_identity':'owner', 'service_key':'k'*40, 'home_callback':'https://home.invalid/auth/callback', 'home_entry':'https://home.invalid/auth/start',
+              'mail':{'transport':'smtp','host':'smtp.invalid','port':587,'sender':'sender@example.invalid','owner':'owner@example.invalid'}}
+    private = tmp_path / 'config.local.json'
+    private.write_text(json.dumps(config))
+    inbox = tmp_path / 'fake-inbox.jsonl'
+    script = "import runpy,os,json; from pathlib import Path; from boomer_switch.website_mail import SMTPTransport; SMTPTransport.send=lambda self,message: Path(os.environ['FAKE_INBOX']).open('a').write(json.dumps({'to':str(message['To']),'body':message.get_content()})+'\\n'); runpy.run_module('boomer_switch.website_cgi',run_name='__main__')"
+    def cgi(path, method='GET', body=None, cookie='', csrf='', owner=False, auth=''):
+        data = json.dumps(body).encode() if body is not None else b''
+        env = dict(os.environ, BOOMER_PRIVATE_CONFIG=str(private), BOOMER_HTTPS='1', FAKE_INBOX=str(inbox),
+                   REQUEST_METHOD=method, PATH_INFO=path, SCRIPT_NAME='/house-lights', CONTENT_TYPE='application/json',
+                   CONTENT_LENGTH=str(len(data)), HTTP_COOKIE=cookie, HTTP_ORIGIN='https://site.invalid',
+                   HTTP_X_CSRF_TOKEN=csrf, HTTP_AUTHORIZATION=auth)
+        env.pop('REMOTE_USER', None)
+        if owner:
+            env['REMOTE_USER'] = 'owner'
+        response = subprocess.run([sys.executable,'-c',script], input=data, capture_output=True, env=env, timeout=10, check=True)
+        head, payload = response.stdout.split(b'\r\n\r\n',1)
+        lines = head.decode().split('\r\n')
+        headers = dict(line.split(': ',1) for line in lines)
+        return int(headers['Status'].split()[0]), headers, json.loads(payload)
+    _, headers, access = cgi('/api/access')
+    cookie, csrf = headers['Set-Cookie'].split(';')[0], access['csrf']
+    store = RegistrationStore(Path(config['state_directory']), mode='production')
+    _, headers, access = cgi('/api/invite','POST',{'invitation':store.invitation()['token']},cookie,csrf)
+    cookie, csrf = headers['Set-Cookie'].split(';')[0], access['csrf']
+    assert cgi('/api/register','POST',{'name':'Guest','email':'guest@example.invalid'},cookie,csrf)[0] == 200
+    delivered = json.loads(inbox.read_text().splitlines()[0])
+    code = re.search(r'\b[0-9]{6}\b',delivered['body']).group()
+    assert cgi('/api/verify','POST',{'code':code},cookie,csrf)[2]['status'] == 'pending'
+    _, owner_headers, people = cgi('/api/people', owner=True)
+    owner_cookie = owner_headers['Set-Cookie'].split(';')[0]
+    person = people['people'][0]
+    assert cgi('/api/people','POST',{'action':'approve','email':person['email'],'revision':person['revision']},owner_cookie,people['csrf'],True)[0] == 200
+    redirect = cgi('/api/handoff','POST',{'challenge':'c'*43,'state':'s'*43},cookie,csrf)[2]['redirect']
+    code = parse_qs(urlsplit(redirect).query)['code'][0]
+    request_id = str(uuid.uuid4())
+    exchange = cgi('/exchange','POST',{'code':code,'challenge':'c'*43,'request_id':request_id},auth='Bearer '+'k'*40)[2]
+    assert exchange['request_id'] == request_id
+    grant_body = {'session':exchange['session'],'request_id':str(uuid.uuid4())}
+    assert cgi('/grant','POST',grant_body,auth='Bearer '+'k'*40)[2]['allowed'] is True
+    store.operator('revoke','guest@example.invalid')
+    assert cgi('/grant','POST',grant_body,auth='Bearer '+'k'*40)[2]['allowed'] is False
+    assert [json.loads(line)['to'] for line in inbox.read_text().splitlines()] == ['guest@example.invalid','owner@example.invalid']
+
+
+def test_card_origin_approved_guest_receives_only_fixed_home_entry(hosted):
+    app, store, _ = hosted
+    cookie, _ = verify(hosted)
+    store.operator('approve', 'guest@example.invalid')
+    result = json.loads(invoke(app, '/api/access', cookie=cookie)[2])
+    assert result['home_entry'] == 'https://home.invalid/start'
+    assert 'home_entry' not in json.loads(invoke(app, '/api/access')[2])
+    assert invoke(app, '/api/handoff', 'POST', {'challenge':'c'*43,'state':'s'*43,'callback':'https://other.invalid/'},cookie,result['csrf'])[0] == 400
+
+
+def test_native_php_bridge_runs_real_cgi_and_keeps_site_owner_cookie_private(tmp_path):
+    import os
+    from pathlib import Path
+    import socket
+    import subprocess
+    import sys
+    import time
+    from http.client import HTTPConnection
+    php = Path(__file__).resolve().parents[1] / 'data/php-runtime/bin/php.exe'
+    if not php.exists():
+        pytest.skip('The optional native PHP runtime is unavailable.')
+    root = Path(__file__).resolve().parents[1]
+    release = tmp_path / 'release'
+    package = release / 'boomer_switch'
+    package.mkdir(parents=True)
+    (package / '__init__.py').write_text('__path__.append('+repr(str(root / 'boomer_switch'))+')')
+    inbox, capture = tmp_path / 'fake-inbox.jsonl', tmp_path / 'captured-env.jsonl'
+    wrapper = '''import importlib.util,json,os
+from pathlib import Path
+from boomer_switch.website_mail import SMTPTransport
+config=json.loads(Path(os.environ['BOOMER_PRIVATE_CONFIG']).read_text())
+with Path(config['capture']).open('a') as target:
+ target.write(json.dumps({'cookie':os.environ.get('HTTP_COOKIE'),'owner':os.environ.get('REMOTE_USER')})+'\\n')
+def fake_send(self,message):
+ with Path(config['fake_inbox']).open('a') as target:
+  target.write(json.dumps({'to':str(message['To']),'body':message.get_content()})+'\\n')
+SMTPTransport.send=fake_send
+spec=importlib.util.spec_from_file_location('boomer_switch._actual_cgi',config['cgi_module'])
+module=importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+raise SystemExit(module.main())
+'''
+    (package / 'website_cgi.py').write_text(wrapper)
+    config = {'state_directory':str(tmp_path / 'state'), 'origin':'https://site.invalid','mount':'/lights','owner_identity':'owner',
+              'service_key':'k'*40,'home_callback':'https://home.invalid/auth/callback','home_entry':'https://home.invalid/auth/start',
+              'mail':{'transport':'smtp','host':'smtp.invalid','port':587,'sender':'sender@example.invalid','owner':'owner@example.invalid'},
+              'fake_inbox':str(inbox),'capture':str(capture),'cgi_module':str(root / 'boomer_switch/website_cgi.py')}
+    private = tmp_path / 'config.local.json'
+    private.write_text(json.dumps(config))
+    def php_string(value):
+        return "'"+str(value).replace('\\','\\\\').replace("'","\\'")+"'"
+    bridge_config = tmp_path / 'config.local.php'
+    bridge_config.write_text("<?php return ["+','.join(php_string(key)+'=>'+php_string(value) for key,value in {
+        'python':sys.executable,'release_directory':str(release),'python_config':str(private),'mount':'/lights','owner_identity':'owner'}.items())+
+        ",'owner_authenticated'=>static fn()=>($_COOKIE['site_owner']??'')==='PRIVATE_OWNER_SENTINEL'];")
+    router = tmp_path / 'router.php'
+    router.write_text("<?php $_SERVER['HTTPS']='on'; require "+php_string(root / 'hosting/index.php')+";")
+    with socket.socket() as listener:
+        listener.bind(('127.0.0.1',0))
+        port = listener.getsockname()[1]
+    env = dict(os.environ, BOOMER_BRIDGE_CONFIG=str(bridge_config))
+    process = subprocess.Popen([str(php),'-n','-S',f'127.0.0.1:{port}',str(router)],cwd=tmp_path,env=env,
+                               stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+    def http(path, body=None, cookie='', csrf=''):
+        connection = HTTPConnection('127.0.0.1',port,timeout=5)
+        headers = {'Cookie':cookie,'Origin':'https://site.invalid','X-CSRF-Token':csrf,'Content-Type':'application/json'}
+        try:
+            connection.request('POST' if body is not None else 'GET','/lights'+path,json.dumps(body) if body is not None else None,headers)
+            response = connection.getresponse()
+            return response.status,dict(response.getheaders()),json.loads(response.read())
+        finally:
+            connection.close()
+    try:
+        for _ in range(100):
+            try:
+                status,headers,access = http('/api/access')
+                break
+            except (OSError, ValueError):
+                if process.poll() is not None:
+                    raise AssertionError('The synthetic PHP host exited.')
+                time.sleep(.05)
+        else:
+            raise AssertionError('The synthetic PHP host did not start.')
+        assert status == 200
+        cookie,csrf = headers['Set-Cookie'].split(';')[0],access['csrf']
+        store = RegistrationStore(Path(config['state_directory']),mode='production')
+        status,headers,access = http('/api/invite',{'invitation':store.invitation()['token']},cookie,csrf)
+        assert status == 200
+        cookie,csrf = headers['Set-Cookie'].split(';')[0],access['csrf']
+        assert http('/api/register',{'name':'Guest','email':'guest@example.invalid'},cookie,csrf)[0] == 200
+        assert json.loads(inbox.read_text().splitlines()[0])['to'] == 'guest@example.invalid'
+        assert http('/api/people',cookie=cookie+'; site_owner=PRIVATE_OWNER_SENTINEL; unrelated=PRIVATE_OTHER_SENTINEL')[0] == 200
+        assert http('/api/people',cookie=cookie+'; bs_owner=malformed; unrelated=PRIVATE_OTHER_SENTINEL')[0] == 403
+        captured = capture.read_text()
+        assert 'PRIVATE_OWNER_SENTINEL' not in captured and 'PRIVATE_OTHER_SENTINEL' not in captured and 'malformed' not in captured
+        assert any(json.loads(line)['owner']=='owner' for line in captured.splitlines())
+    finally:
+        process.terminate()
+        process.wait(timeout=5)

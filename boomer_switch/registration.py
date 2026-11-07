@@ -33,7 +33,10 @@ class RegistrationStore:
     MAX_TOTAL_SENDS = 20
     SESSION_SECONDS = 86400
 
-    def __init__(self, directory: Path, *, clock=time.time):
+    def __init__(self, directory: Path, *, clock=time.time, mode="demo"):
+        if mode not in ("demo", "production"):
+            raise ValueError("Use an explicit supported store mode.")
+        existed = (directory / "registration.sqlite").exists()
         directory.mkdir(parents=True, exist_ok=True)
         self.path = directory / "registration.sqlite"
         self.clock = clock
@@ -60,6 +63,14 @@ class RegistrationStore:
                     id INTEGER PRIMARY KEY CHECK(id=1), started REAL NOT NULL, sends INTEGER NOT NULL);
             """)
             db.execute("BEGIN IMMEDIATE")
+            marker = db.execute("SELECT value FROM settings WHERE key='store_mode'").fetchone()
+            if marker is None:
+                if existed and mode == "production":
+                    raise ValueError("Use a fresh production state directory. Existing demo state cannot become production state.")
+                db.execute("INSERT INTO settings VALUES ('store_mode', ?)", (mode,))
+            elif marker[0] != mode:
+                raise ValueError("The state directory belongs to another environment.")
+            self.mode = mode
             columns = {row["name"] for row in db.execute("PRAGMA table_info(guests)")}
             if "email_verified" not in columns:
                 # Existing guest rows came only from successful inbox verification.
@@ -123,6 +134,13 @@ class RegistrationStore:
                 guest = db.execute("SELECT * FROM guests WHERE email=?", (previous["email"],)).fetchone()
                 if self._active(guest) or (guest is not None and guest["status"] == "pending"):
                     return existing
+            if self.mode == "production":
+                db.execute("DELETE FROM challenges WHERE session IN (SELECT id FROM sessions WHERE expires<=?)", (self.clock(),))
+                db.execute("DELETE FROM sessions WHERE expires<=?", (self.clock(),))
+                if previous is not None and previous["invitation"] == invitation:
+                    return existing
+                if db.execute("SELECT COUNT(*) FROM sessions WHERE verified=0").fetchone()[0] >= 1000:
+                    raise AccessDenied("Registration is busy. Try again later.")
             db.execute("INSERT INTO sessions(id, invitation, expires) VALUES (?, ?, ?)",
                        (_digest(raw), invitation, self.clock() + self.SESSION_SECONDS))
         return raw
@@ -171,8 +189,11 @@ class RegistrationStore:
     def _issue(self, db, session, name, email):
         guest = db.execute("SELECT * FROM guests WHERE email=?", (email,)).fetchone()
         invitation = None if self._active(guest) else session["invitation"]
-        if not self._active(guest) and invitation != self._setting(db, "invitation"):
+        eligible = self._active(guest) or invitation == self._setting(db, "invitation")
+        if not eligible and self.mode != "production":
             raise AccessDenied("Use a current invitation before registration.")
+        if not eligible:
+            invitation = None
         now = self.clock()
         budget = db.execute("SELECT * FROM budget WHERE id=1").fetchone()
         if budget is None or now - budget["started"] >= self.WINDOW_SECONDS:
@@ -191,7 +212,8 @@ class RegistrationStore:
         db.execute("UPDATE budget SET sends=sends+1 WHERE id=1")
         db.execute("INSERT OR REPLACE INTO challenges VALUES (?, ?, ?, ?, ?, ?)",
                    (session["id"], email, name, self._code_digest(db, session["id"], code), now + self.CODE_SECONDS, invitation))
-        db.execute("INSERT INTO mailbox(kind,email,code,created_at) VALUES ('code',?,?,?)", (email, code, now))
+        if eligible:
+            db.execute("INSERT INTO mailbox(kind,email,code,created_at) VALUES ('code',?,?,?)", (email, code, now))
 
     def start(self, raw, name, email):
         if not isinstance(name, str) or not 1 <= len(name.strip()) <= 80:
@@ -205,7 +227,7 @@ class RegistrationStore:
 
     @staticmethod
     def _email(email):
-        if not isinstance(email, str) or not re.fullmatch(r"[^\s@]{1,64}@[^\s@.]{1,120}(?:\.[^\s@.]{1,63})+", email) or len(email) > 254:
+        if not isinstance(email, str) or not re.fullmatch(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+", email) or len(email) > 254:
             raise AccessDenied("Enter a valid email address.")
         return email.lower()
 
@@ -228,6 +250,12 @@ class RegistrationStore:
             if challenge["invitation"] is None:
                 current_guest = db.execute("SELECT * FROM guests WHERE email=?", (challenge["email"],)).fetchone()
                 if not self._active(current_guest):
+                    if self.mode == "production":
+                        limit = db.execute("SELECT * FROM limits WHERE email=?", (challenge["email"],)).fetchone()
+                        if limit["attempts"] >= self.MAX_ATTEMPTS:
+                            raise AccessDenied("Wait before you try another code.")
+                        db.execute("UPDATE limits SET attempts=attempts+1 WHERE email=?", (challenge["email"],))
+                        raise AccessDenied("Enter the current verification code.")
                     raise AccessDenied("Current permission is unavailable.")
             limit = db.execute("SELECT * FROM limits WHERE email=?", (challenge["email"],)).fetchone()
             if limit["attempts"] >= self.MAX_ATTEMPTS:

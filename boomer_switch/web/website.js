@@ -6,7 +6,10 @@ const connect = document.querySelector("#connect");
 let csrf = "";
 let busy = false;
 let approved = false;
+let homeEntry = null;
 const fragment = new URLSearchParams(location.hash.slice(1));
+if (fragment.has("invitation")) sessionStorage.setItem("invitation", fragment.get("invitation"));
+if (location.hash) history.replaceState(null, "", location.pathname);
 if (fragment.has("challenge") && fragment.has("state")) {
   sessionStorage.setItem("homeChallenge", fragment.get("challenge"));
   sessionStorage.setItem("homeState", fragment.get("state"));
@@ -23,10 +26,11 @@ async function request(path, body) {
 }
 function show(result) {
   approved = result.status === "approved";
+  homeEntry = result.home_entry || null;
   details.hidden = !["anonymous", "invited"].includes(result.status);
   verification.hidden = result.status !== "verify";
-  connect.hidden = !approved || !sessionStorage.getItem("homeChallenge");
-  statusLine.textContent = {anonymous: "Open an invitation, or verify an approved email again.", invited: "Enter your name and email.", verify: "Enter the code from your email.", pending: "Waiting for approval", approved: "Access approved. Return through the home guest page to open controls.", denied: "Access unavailable. Contact the owner."}[result.status] || "Access unavailable.";
+  connect.hidden = !approved || !(homeEntry || sessionStorage.getItem("homeChallenge"));
+  statusLine.textContent = {anonymous: "Open an invitation, or verify an approved email again.", invited: "Enter your name and email.", verify: "Enter the code from your email.", pending: "Waiting for approval", approved: "Access approved. Open the home controls.", denied: "Access unavailable. Contact the owner."}[result.status] || "Access unavailable.";
 }
 async function submit(path, body) {
   if (busy) return;
@@ -42,6 +46,7 @@ document.querySelector("#resend").addEventListener("click", () => submit("api/re
 connect.addEventListener("click", async () => {
   if (busy || !approved) return;
   busy = true;
+  if (!sessionStorage.getItem("homeChallenge")) { location.replace(homeEntry); return; }
   try {
     const result = await request("api/handoff", {challenge: sessionStorage.getItem("homeChallenge"), state: sessionStorage.getItem("homeState")});
     sessionStorage.removeItem("homeChallenge"); sessionStorage.removeItem("homeState");
@@ -50,6 +55,14 @@ connect.addEventListener("click", async () => {
 });
 async function refresh() {
   if (busy || document.hidden) return;
-  try { show(await request("api/access")); } catch { statusLine.textContent = "Access unavailable. Refresh this page."; }
+  try {
+    let result = await request("api/access");
+    const invitation = sessionStorage.getItem("invitation");
+    if (invitation) {
+      sessionStorage.removeItem("invitation");
+      result = await request("api/invite", {invitation});
+    }
+    show(result);
+  } catch { statusLine.textContent = "Access unavailable. Refresh this page."; }
 }
 refresh(); setInterval(refresh, 3000);

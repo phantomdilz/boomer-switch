@@ -16,7 +16,7 @@ def create_application(config, *, grant_app=None):
     state = Path(config["state_directory"])
     if not state.is_absolute():
         raise ValueError("Configure an absolute private state directory.")
-    store = RegistrationStore(state)
+    store = RegistrationStore(state, mode="production")
     mail_config = config["mail"]
     if mail_config["transport"] == "smtp":
         transport = SMTPTransport(mail_config["host"], mail_config["port"], mail_config.get("username"), mail_config.get("password"), implicit_tls=mail_config.get("implicit_tls", False))
@@ -25,7 +25,7 @@ def create_application(config, *, grant_app=None):
     else:
         raise ValueError("Configure the website mail transport.")
     mail = WebsiteMail(store, transport, mail_config["sender"], mail_config["owner"])
-    handoff = WebsiteHandoff(store, config["service_key"], config["home_callback"])
+    handoff = WebsiteHandoff(store, config["service_key"], config["home_callback"], config["home_entry"])
     return WebsiteApplication(store, mail, origin=config["origin"], mount=config["mount"],
                               owner_identity=config["owner_identity"], grant_app=grant_app, handoff=handoff)
 

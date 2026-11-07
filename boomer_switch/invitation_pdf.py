@@ -15,7 +15,7 @@ def protect_template(template: Path, *outputs: Path):
             raise ValueError("Choose outputs separate from the blank master.")
 
 
-def render_invitation_pdf(template: Path, output: Path, invite_url: str, short_url: str) -> Path:
+def render_invitation_pdf(template: Path, output: Path, invite_url: str, short_url: str, *, production=False) -> Path:
     """Render both retained US-Letter designs without changing the blank master."""
     import segno
     from pypdf import PdfReader, PdfWriter
@@ -28,6 +28,8 @@ def render_invitation_pdf(template: Path, output: Path, invite_url: str, short_u
         if not isinstance(address, str) or not address.isascii() or any(ord(char) < 33 or ord(char) > 126 for char in address):
             raise ValueError("Use a printable ASCII invitation address.")
         parsed = urlsplit(address)
+        if production and (parsed.scheme != "https" or parsed.query):
+            raise ValueError("Use a verified HTTPS production invitation address.")
         if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
             raise ValueError("Use an explicit invitation address without credentials.")
     if template.stat().st_size > 20 * 1024 * 1024:
@@ -78,23 +80,24 @@ def render_invitation_pdf(template: Path, output: Path, invite_url: str, short_u
         right, baseline, size = layout["label"]
         canvas.setFont("Helvetica-Bold", size)
         canvas.drawString(x, baseline, "LINK / SHORTCUT - TYPE AS ONE ADDRESS")
-        canvas.drawRightString(right, baseline, "SAMPLE - LOCAL DEMO")
+        canvas.drawRightString(right, baseline, "HOUSE LIGHTS" if production else "SAMPLE - LOCAL DEMO")
         if index == 0:
             canvas.setFillColorRGB(1, 1, 1)
             canvas.rect(125, 82, 370, 18, stroke=0, fill=1)
             canvas.setFillColorRGB(0.25, 0.35, 0.34)
             canvas.setFont("Helvetica", 9.5)
-            canvas.drawCentredString(306, 89, "Sample only. This is not a live invitation.")
+            canvas.drawCentredString(306, 89, "Verify your email to request access." if production else "Sample only. This is not a live invitation.")
         baseline = layout["footer"]
         canvas.setFillColorRGB(1, 1, 1)
         canvas.rect(160, baseline - 5, 300, 20, stroke=0, fill=1)
         canvas.setFillColorRGB(0.25, 0.35, 0.34)
         canvas.setFont("Helvetica", 8)
-        canvas.drawCentredString(306, baseline, f"US LETTER | SAMPLE INVITATION | {index + 1} OF 2")
+        canvas.drawCentredString(306, baseline, f"US LETTER | {'HOUSE LIGHTS INVITATION' if production else 'SAMPLE INVITATION'} | {index + 1} OF 2")
         canvas.save()
         target = writer.add_page(page)
         target.merge_page(PdfReader(BytesIO(stream.getvalue())).pages[0])
-    writer.add_metadata({"/Title": "Sample House Lights invitation", "/Subject": "Synthetic local demo only"})
+    writer.add_metadata({"/Title": "House Lights invitation" if production else "Sample House Lights invitation",
+                         "/Subject": "Private invitation" if production else "Synthetic local demo only"})
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
