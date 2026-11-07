@@ -2,7 +2,7 @@
 
 ## Summary
 A mobile-friendly web page lets invited guests turn household lights on and off from their phone browser.
-Guests must use the home's main Wi-Fi or guest Wi-Fi.
+Guests must use the home's current internet egress and a verified, approved website session.
 They can use a bookmark on return visits without a vendor app, VPN client, shared credentials, or a physical switch.
 
 The guest page groups lights by room with names a visitor recognizes. Each light has large On and Off controls. The page shows the state reported by the device and displays **Unavailable** when it cannot confirm that state.
@@ -23,13 +23,20 @@ A private People page on the owner's website, behind the owner's sign-in:
 
 The home service enforces removal and expiration on the next light command, including from an already-open page. Device credentials and control stay on the home server.
 Before each command, the home service must verify current website permission.
-It must also confirm that the guest uses the home's main Wi-Fi or guest Wi-Fi.
+The website must also match the guest's direct source to a fresh authenticated home poll before each read or command.
 Each command must fail closed if either check fails or cannot confirm access.
 
 ## Network and device design
-- Only the guest service is published from an always-on home server via Tailscale Funnel (HTTPS, normal browser). The home router's guest-network isolation stays enabled across all mesh nodes. No port forwarding or fixed public IP required.
-- Guest controls require the home's main Wi-Fi or guest Wi-Fi. Remote control is not allowed, even with current owner approval.
-- python-kasa on the main network: read-only discovery first, then the owner selects which bulbs and individual outlets appear; the allowlist is enforced server-side. Pilot devices: HS103 plug, LB130 bulb, KL130 bulb (listed as supported by python-kasa; installed hardware/firmware still need a local check).
+
+- The external HTTPS website is the guest's only origin for invitations, registration, light controls, and bookmarks.
+- A single home agent makes authenticated outbound polls. There is no inbound home service, callback, guest app, or tunnel requirement.
+- The website learns the current home internet address from the direct server-observed source of an authenticated poll.
+- The website automatically replaces that source after an ISP address change. Existing approvals and bookmarks remain valid.
+- A source change or freshness gap invalidates old operation generations. Offline taps never replay after reconnect.
+- This IPv4 pilot requires a validated IPv4-only application origin. It rejects IPv6 sources and never infers a shared IPv6 prefix.
+- Shared internet egress includes home Wi-Fi, wired clients, and a VPN through home. The operator accepted this boundary.
+- A cellular or other remote connection fails closed, even with current owner approval.
+- Device credentials and python-kasa stay on the home server. The owner-selected allowlist remains authoritative.
 
 ## Milestones
 1. Discover and label pilot devices
@@ -44,7 +51,6 @@ This project uses the [MIT License](../LICENSE).
 
 ## Validation still required
 
-The exact presence check still requires implementation and validation.
-The presence check must confirm guest access through the main Wi-Fi or guest Wi-Fi while guest-network isolation stays enabled.
-Authenticated HTTPS remains a proposed transport for the website permission check.
-The transport and authentication method still require validation before implementation.
+The actual hosting runtime, direct-source topology, and IPv4-only route need an authorized live check.
+Real mail and physical device acceptance remain separate from synthetic test evidence.
+[Hosted registration and controls](HOSTED_REGISTRATION.md) defines the approved source and outbound-agent contract.

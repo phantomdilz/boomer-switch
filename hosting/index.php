@@ -33,7 +33,15 @@ try {
             $componentCookies[] = $name . '=' . $value;
         }
     }
+    $directSource = ($config['direct_source'] ?? false) === true;
+    foreach (array_keys($_SERVER) as $name) {
+        if ($name === 'HTTP_FORWARDED' || $name === 'HTTP_X_REAL_IP' || $name === 'HTTP_CLIENT_IP' ||
+            str_starts_with($name, 'HTTP_X_FORWARDED') || str_starts_with($name, 'HTTP_CF_') || str_starts_with($name, 'HTTP_TRUE_CLIENT')) {
+            $directSource = false;
+        }
+    }
     $env = [
+        'BOOMER_DIRECT_SOURCE' => $directSource ? '1' : '0', 'REMOTE_ADDR' => $_SERVER['REMOTE_ADDR'] ?? '',
         'BOOMER_PRIVATE_CONFIG' => $config['python_config'], 'BOOMER_HTTPS' => '1',
         'REQUEST_METHOD' => $_SERVER['REQUEST_METHOD'], 'PATH_INFO' => substr($path, strlen($mount)),
         'SCRIPT_NAME' => $mount, 'CONTENT_LENGTH' => (string)strlen($body),

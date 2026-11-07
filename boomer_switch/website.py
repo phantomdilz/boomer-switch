@@ -11,12 +11,14 @@ from urllib.parse import urlsplit
 from .people import OwnerPrincipal, PeopleApplication, owner_cookie
 from .registration import AccessDenied, _digest
 from .website_mail import MailUnavailable
+from .home_rendezvous import HomeUnavailable, OperationConflict
+from .website_grants import json_object
 
 
 class WebsiteApplication:
     """Keep public registration separate from current server-authenticated People."""
 
-    def __init__(self, store, mail, *, origin, mount, owner_identity, grant_app=None, handoff=None):
+    def __init__(self, store, mail, *, origin, mount, owner_identity, grant_app=None, handoff=None, rendezvous=None):
         parsed = urlsplit(origin)
         if parsed.scheme != "https" or not parsed.netloc or parsed.path or parsed.query or parsed.fragment or parsed.username:
             raise ValueError("Configure the HTTPS website origin.")
@@ -26,6 +28,7 @@ class WebsiteApplication:
             raise ValueError("Configure the owner identity.")
         self.store, self.mail, self.origin, self.mount = store, mail, origin, mount
         self.owner_identity, self.grant_app, self.handoff = owner_identity, grant_app, handoff
+        self.rendezvous = rendezvous
         self.people = PeopleApplication(store)
         with store._transaction() as db:
             db.execute("CREATE TABLE IF NOT EXISTS website_owners (id TEXT PRIMARY KEY, csrf TEXT NOT NULL, expires REAL NOT NULL)")
@@ -80,10 +83,14 @@ class WebsiteApplication:
     def _csrf(raw):
         return hashlib.sha256(("website-csrf:" + raw).encode()).hexdigest()
 
-    def _access(self, raw):
+    def _access(self, raw, environ=None):
         status = self.store.status(raw)
         result = {"status": status, "csrf": self._csrf(raw)}
-        if status == "approved" and self.handoff is not None:
+        if self.rendezvous is not None:
+            result["home_ready"] = self.rendezvous.access(raw, environ or {}) if status == "approved" else False
+            if result["home_ready"]:
+                result["light"] = self.rendezvous.display(raw, environ or {})
+        if self.rendezvous is None and status == "approved" and self.handoff is not None:
             result["home_entry"] = self.handoff.entry
         return result
 
@@ -96,7 +103,7 @@ class WebsiteApplication:
         length = int(environ.get("CONTENT_LENGTH") or 0)
         if not 0 < length <= 2048 or environ.get("CONTENT_TYPE", "").split(";")[0] != "application/json":
             raise ValueError
-        body = json.loads(environ["wsgi.input"].read(length))
+        body = json_object(environ["wsgi.input"].read(length))
         if not isinstance(body, dict):
             raise ValueError
         return body
@@ -119,6 +126,15 @@ class WebsiteApplication:
                 return self.grant_app(environ, start_response)
             if self.handoff is not None and method == "POST" and path == "/exchange":
                 payload = self.handoff.exchange(environ)
+                encoded = json.dumps(payload).encode()
+                start_response("200 OK", [("Content-Type", "application/json"), ("Cache-Control", "no-store"), ("Content-Length", str(len(encoded)))])
+                return [encoded]
+            if self.rendezvous is not None and path.startswith("/home/") and method == "POST":
+                length = int(environ.get("CONTENT_LENGTH") or 0)
+                if not 0 < length <= 2048 or environ.get("CONTENT_TYPE", "").split(";")[0] != "application/json":
+                    raise ValueError
+                body = json_object(environ["wsgi.input"].read(length))
+                payload = self.rendezvous.machine(environ, path, body)
                 encoded = json.dumps(payload).encode()
                 start_response("200 OK", [("Content-Type", "application/json"), ("Cache-Control", "no-store"), ("Content-Length", str(len(encoded)))])
                 return [encoded]
@@ -146,7 +162,12 @@ class WebsiteApplication:
                 raw, issued = self._bootstrap(raw)
                 if issued:
                     headers.append(("Set-Cookie", self._cookie("bs_session", raw)))
-                payload = self._access(raw)
+                payload = self._access(raw, environ)
+            elif method == "POST" and path == "/api/lights" and self.rendezvous is not None:
+                payload = self.rendezvous.enqueue(raw, environ, self._body(environ, raw))
+                status = "202 Accepted"
+            elif method == "GET" and path.startswith("/api/operations/") and self.rendezvous is not None:
+                payload = self.rendezvous.operation(raw, environ, path.rsplit("/",1)[1])
             elif method == "POST" and path == "/api/invite":
                 body = self._body(environ, raw)
                 if set(body) != {"invitation"}:
@@ -154,7 +175,7 @@ class WebsiteApplication:
                 new_raw = self.store.browser(body["invitation"], existing=raw)
                 if new_raw != raw:
                     headers.append(("Set-Cookie", self._cookie("bs_session", new_raw)))
-                payload = self._access(new_raw)
+                payload = self._access(new_raw, environ)
             elif method == "POST" and path == "/api/handoff" and self.handoff is not None:
                 body = self._body(environ, raw)
                 if set(body) != {"challenge", "state"}:
@@ -171,11 +192,15 @@ class WebsiteApplication:
                 else:
                     raise ValueError
                 self.mail.deliver()
-                payload = self._access(raw)
+                payload = self._access(raw, environ)
             else:
                 status, payload = "404 Not Found", {"error": "Page unavailable."}
+        except OperationConflict as error:
+            status, payload = "409 Conflict", {"error": str(error)}
         except AccessDenied as error:
             status, payload = "403 Forbidden", {"error": str(error)}
+        except HomeUnavailable as error:
+            status, payload = "503 Service Unavailable", {"error": str(error)}
         except MailUnavailable as error:
             status, payload = "503 Service Unavailable", {"error": str(error)}
         except (ValueError, TypeError, UnicodeError):

@@ -1,163 +1,192 @@
-# Hosted registration install
+# Hosted registration and light controls
 
-This component uses the existing website mail service and owner sign-in.
-It does not control devices or prove home Wi-Fi access.
-The home service must enforce its network boundary before each command.
-The host runtime and the acceptance demo still require operator checks.
+The external website is the guest's only origin.
+Its invitation, registration, approval wait, controls, and bookmark use the same HTTPS namespace.
+The owner uses the existing private People page and sign-in.
+The home agent makes outbound requests. Guests need no home app, callback, VPN, or Wi-Fi configuration.
+No inbound home service, tunnel, or port forwarding forms part of this route.
 
-## Runtime choices
+Every state request and command requires a current verified approval and the current home internet source.
+The website compares its direct IPv4 peer with the source of a fresh authenticated home poll.
+This proves shared internet egress. It does not distinguish Wi-Fi, wired clients, or a VPN through home.
+The operator accepted that boundary. A cellular or other remote source fails closed.
 
-Use Python 3.11 or later with SQLite and SSL support.
+## IPv4 and trusted hosting
+
+This pilot uses an IPv4-only application origin.
+Configure and verify its IPv4 DNS route for both the browser and home agent before a live test.
+An AAAA record, IPv6 HTTPS/SVCB hint, or alternate IPv6 route must not bypass this requirement.
+The home client uses IPv4. The website rejects every IPv6 source, including IPv4-mapped IPv6.
+It never infers a shared IPv6 prefix from one address. There is no automatic address-family fallback.
+A later IPv6 design needs its own verified source contract.
+
+Use a direct host connection for this namespace.
+The PHP bridge reads server `REMOTE_ADDR`, not a browser field or forwarded header.
+Its private `direct_source` setting must remain false until the operator verifies the server's peer semantics.
+A CDN, reverse proxy, or server module that rewrites the peer makes this topology unsupported.
+Forwarded-source headers disable device authority, even when the remaining request authenticates.
+Do not copy `X-Forwarded-For`, `Forwarded`, or another client header into the peer field.
+An unsupported host can serve registration, but it cannot authorize light state or commands.
+
+The IPv4-only origin must also support the owner's existing sign-in on that origin.
+A new hostname does not automatically share a host-only sign-in cookie.
+Keep the existing website root and login unchanged until a scoped installation plan resolves that integration.
+
+## PHP and private Python
+
+Use Python 3.11 or later with SQLite and SSL.
 Install the `website` extra in a private virtual environment.
-A WSGI host can call `boomer_switch.website_cgi.create_application` with private configuration.
-Compose its `grant_app` from `boomer_switch.website_grants.create_website_grant_application` with the same database and service key.
-This is the PJ-60 component. Do not copy its grant rules.
+Put `hosting/index.php` only inside the dedicated namespace.
+Route every path within that namespace to that bridge.
+PHP 8.2 must support `proc_open` with an array command.
+Each request starts one private Python CGI process. No persistent Python listener is required.
+The bridge bounds bodies, output, and process duration. It discards provider error text.
 
-On a PHP-only host, use `hosting/index.php` inside a new dedicated namespace.
-It calls the Python module once per request through `proc_open`.
-It does not need a persistent Python listener.
+Keep both configuration files and the canonical SQLite directory outside the document root.
+Keep credentials, paths, real addresses, and generated private cards outside this public repository.
+Set `BOOMER_BRIDGE_CONFIG` in server configuration to the private PHP file.
+That file returns these fields:
 
-The bridge bounds request bodies, response bodies, and process duration.
-PHP must support `proc_open`, an array command, and the configured Python interpreter.
-The bridge requires PHP 8.2.
-Check these facts before installation.
+- `python`: absolute virtual-environment interpreter path.
+- `release_directory`: selected private code release.
+- `python_config`: private JSON configuration path.
+- `mount`: dedicated URL prefix without a final slash.
+- `owner_identity`: internal owner constant, matching the JSON file.
+- `owner_authenticated`: callable for the existing server-side owner-session validator.
+- `direct_source`: true only after the direct-source hosting check above.
 
-## Private configuration
+The validator must check the existing owner session on every private request.
+A nonempty cookie or client identity header is not sufficient.
+The PHP bridge sends only valid component cookies to Python.
+The existing website's sign-in credential stays inside its current validator.
 
-Keep both configuration files and the SQLite directory outside the document root.
-Set restrictive file permissions for the website account.
-Do not read or copy the existing authentication secrets into the release.
-Do not store real values in this public repository.
+The private JSON file holds:
 
-The private PHP file returns an array with these keys:
-
-- `python`: absolute path to the private virtual environment's Python executable.
-- `release_directory`: absolute path to the selected immutable application release.
-- `python_config`: absolute path to the private JSON configuration file.
-- `mount`: the dedicated URL prefix, without a final slash.
-- `owner_identity`: an internal constant that matches the Python configuration.
-- `owner_authenticated`: a callable that invokes the existing site's owner-session validator on every request.
-
-Set the server environment variable `BOOMER_BRIDGE_CONFIG` to this private PHP file.
-The callable must validate the current owner cookie through the existing server-only configuration.
-A cookie name, header, or nonempty cookie value alone is not enough.
-If the existing site has no callable validator, adapt its existing validator in private code.
-Keep that adapter outside the public document root and repository.
-Never allow a client to choose `REMOTE_USER`, the private configuration path, or the interpreter.
-
-The private JSON file has these keys:
-
-- `state_directory`: private canonical state directory. Its database is `registration.sqlite`.
-- `origin`: exact HTTPS website origin, without a trailing slash.
-- `mount`: the same dedicated URL prefix.
+- `state_directory`: canonical production state directory.
+- `origin`: exact HTTPS origin, without a final slash.
+- `mount`: the same namespace prefix.
 - `owner_identity`: the same internal owner constant.
-- `service_key`: at least 32 private characters, shared only with the home service.
-- `home_entry`: fixed HTTPS home front door at `/auth/start`, on the callback origin.
-- `home_callback`: exact HTTPS callback URL on the home guest service, without a query or fragment.
-- `mail`: the transport settings below.
+- `service_key`: private key of at least 32 characters, shared with the single home agent.
+- `idle_poll_seconds`: optional integer from 15 through 60. The default is 15.
+- `mail`: the existing website transport settings below.
+
+The production factory is `boomer_switch.website_cgi.create_application`.
+It opens the canonical store in production mode and creates the rendezvous owner.
+It does not enable the old home callback, exchange, or grant endpoints.
+A direct WSGI host must supply a trusted HTTPS scheme, `REMOTE_ADDR`, and server-only `boomer.direct_peer=True`.
+It must also enforce the equivalent 25-second total request limit.
+Never derive these values from client headers.
+
+## Mail
 
 For SMTP, `mail` holds `transport: smtp`, `host`, numeric `port`, `sender`, and `owner`.
 It can also hold `username`, `password`, and Boolean `implicit_tls`.
-SMTP always requires certificate-verified TLS. Plain SMTP is unavailable.
-
+SMTP always uses certificate-verified TLS. Its socket operations have a 5-second timeout each.
+The PHP process limit provides the outer deadline.
 For the existing local mail facility, use `transport: sendmail`, an absolute `executable`, `sender`, and `owner`.
-Use the existing website transport. Do not provision another mail provider.
+Do not provision a new provider.
 
-## Scoped staged install
+Registration retains its per-email and global send limits.
+Each mail row has one durable claim and stable Message-ID.
+Only one validated recipient enters the explicit mail envelope.
+Code plaintext leaves durable storage before the external attempt.
+Expired codes and obsolete notices never enter the transport.
+Uncertain deliveries remain `unknown` and never retry automatically.
+Check the mail provider's authoritative result before a manual recovery.
+No production route exposes the demo mailbox.
 
-1. Confirm the runtime checks above without a mail send or a private-secret read.
-2. Create a new private release directory and install the reviewed source and `website` extra there.
-3. Create a new private state directory and private configuration files.
-4. Wire the private owner validator to the existing site's current sign-in.
-5. Create only the dedicated namespace in the public document root.
-6. Put the PHP bridge there and route every path within that namespace to it.
-7. Exempt public guest paths from any inherited whole-site login redirect.
-8. Keep `/people`, `/people.js`, and `/api/people` behind the current owner validator.
-9. Keep the rest of the website's root, login, files, and routes unchanged.
-10. Suppress or redact full request targets for `/invite/<token>` and `/s/<alias>` before live links.
-11. Redact the home callback query before a live exchange.
-12. Verify HTTPS and private-route rejection before a scoped live mail demo.
-13. Test one guest code and one owner notice only with explicit mail authority.
-
-No live mail, public upload, or production configuration read forms part of local verification.
-If a route rewrite, authentication hook, or transport setting is unknown, retain the staged release privately.
-Do not route public requests to an incomplete bridge.
-
-## Guest and home session contract
-
-The website cookie is Secure, HttpOnly, and SameSite=Strict.
-Its path is the component namespace. It never becomes a home session.
-An approved guest from the printed card can select **Open home controls** to open that fixed home entry.
-
-The home front door creates a browser-bound random challenge and state.
-It opens the website guest page with `#challenge=OPAQUE_CHALLENGE&state=OPAQUE_STATE`.
-The website removes the fragment and keeps these values in that tab's session storage.
-
-After approval, the guest selects **Open home controls**.
-The same-origin request requires the website's CSRF token and exact Origin.
-The website returns the fixed configured home callback with a short code and state.
-The browser cannot choose a callback URL.
-
-The home callback must match state to its pending browser cookie before any exchange.
-Its server posts `{code, challenge, request_id}` to `/exchange` with the private Bearer service key over HTTPS.
-The response holds `{session, expires, request_id}`.
-The home server checks the request ID and expiry before it issues its own HttpOnly cookie.
-
-Codes expire after 60 seconds. Different replays fail.
-An exact retry returns the same token after an ambiguous network result.
-The home token maps to the canonical verified website session through `home_sessions`.
-
-The PJ-60 `/grant` adapter reads that map and current People permission for each command.
-The browser never receives the service key or a website cookie in a URL.
-No cross-domain cookie sharing is required.
-
-## Mail outcomes and recovery
-
-Registration keeps its existing per-email and global send limits.
-An unmarked database with historical demo mail cannot activate the live transport.
-Expired or superseded codes never enter the transport.
-Each durable mail row has one claim and one stable Message-ID.
-
-The worker clears code plaintext before an external send.
-It sends at most 4 messages per request, with a 5-second timeout for each transport operation.
-Owner notices use the canonical verified pending revision, so repeat verification does not duplicate a notice.
-No production route exposes the fake mailbox or sample controls.
-
-A failed or interrupted send stays `unknown` in `mail_delivery`.
-The application does not retry that row automatically because the provider can already have accepted it.
-Check the existing mail provider's authoritative result before any manual recovery.
-A guest can request a new code after the existing delay and quota checks.
-Provider errors and message contents never enter the public response.
-
-## Rollback
-
-Remove only the new namespace route or restore its previous staged pointer.
-Stop any task-owned CGI processes before a release replacement.
-Keep the private database and configuration in place for recovery.
-Keep state, the website root, and the existing login unchanged.
+Production initialization refuses an existing demo or unmarked store.
+Demo callers cannot open production state.
+A fresh production directory starts with new invitation state.
+Later code updates retain that directory, so accepted approvals, invitation URLs, and guest cookies survive.
 Do not restore an old database over accepted People decisions.
 
-Reinstall the prior reviewed code only when its schema remains compatible.
-The added tables do not change the existing registration tables.
+## Current source and operation contract
+
+`POST /home/poll` requires HTTPS, the private Bearer key, and direct source evidence.
+Its body is `{agent_id, sequence, request_id, light}` with canonical UUIDs and a durable increasing sequence.
+The first valid poll binds the single agent identity.
+Another agent or a lower sequence cannot replace its state.
+The `light` field holds only the owner-selected public `light_id`, `name`, and `room`.
+Only an approved matching-source browser can receive these labels.
+An exact same-source retry does not extend freshness.
+
+The website atomically updates the authenticated source and connection generation.
+An address change or a gap of at least 6 seconds starts a new generation.
+An authenticated source mismatch on another agent request retires the old epoch until a fresh ordered poll.
+An observed guest source change invalidates that guest's open assignments, even after a return to the old source.
+Returning from source A to B and then A does not restore A's old generation.
+An old or reordered poll cannot restore the old source.
+A queued tap expires after 8 seconds and never returns to the queue.
+A reconnect cannot revive a tap from before a freshness gap, even on the same address.
+
+The poll response is `{request_id, generation, expires, poll_after, operation}`.
+An assignment is `{operation_id, action, session_binding, generation, expires}`.
+`action` is `read`, `on`, or `off`. The session binding is a hash, not a browser cookie.
+Each operation receives one poll assignment. A later poll never delivers it again.
+The home journal prevents duplicate physical dispatch after ambiguous requests or restarts.
+
+Before dispatch, the home agent posts `{agent_id, sequence, request_id, operation_id, generation}` to `/home/authorize`.
+The website checks current canonical approval, session expiry, source, freshness, generation, and operation expiry again.
+The response is `{allowed, request_id, operation_id, generation, expires}` with at most 2 seconds of authority.
+Its deadline never exceeds the source proof or operation deadline.
+A browser demand hint alone grants no state or device authority.
+
+The agent posts the same assignment fields plus `outcome` to `/home/result`.
+An outcome is `{status, state}` with a bounded confirmed or unavailable result.
+An exact result retry is accepted. A conflicting result fails.
+A bound result can record truth after a later address change, but it grants no new operation.
+Guests cannot read an old generation's result as current state.
+Late receipts remain truth, but state freshness uses the operation issue time, not the receipt arrival.
+Expired read rows receive a 60-second grace period, then the website removes them.
+The runner drops expired read receipts. Mutation deduplication and unresolved effects remain durable.
+Completed mutation rows lose obsolete peer and session data. Indexed queue and cleanup queries bound routine scans.
+
+## Cadence and ordinary guest flow
+
+The default idle poll interval is 15 seconds, or 5,760 requests per day.
+An operator can select 60 seconds, or 1,440 idle requests per day.
+Recent approved browser interest from the matching source selects a 1-second active interval.
+A continuously active connection can make 86,400 polls per day.
+The home runner enforces at least 1 second between cycles, including failures.
+
+The visible browser checks access every 3 seconds and a pending operation each second.
+It pauses while hidden and requests fresh confirmed state at least every 5 seconds while active.
+The first visit or reconnect can wait up to the configured idle interval, plus bounded state-query time.
+The website waits for a demand-aware fast poll before it accepts work.
+The same page shows that wait and automatically checks again. The guest needs no reload.
+Offline taps do not enter a durable queue.
+Unavailable or uncertain state disables On and Off until a fresh read confirms state.
+
+## Staged installation and rollback
+
+1. Verify runtime support, direct peer semantics, and the IPv4-only origin without a mail or device action.
+2. Stage the reviewed release, private configuration, and private production directory.
+3. Connect the existing owner validator on the intended origin.
+4. Install only the dedicated namespace and its route to the PHP bridge.
+5. Exempt public guest routes from inherited whole-site login redirects.
+6. Keep People pages and actions behind the current owner validator.
+7. Suppress or redact full request targets for invitation and short-link paths before live links.
+8. Verify TLS, denied cellular requests, and forged-header rejection before external effects.
+9. Perform mail and device trials only under their explicit scoped authority.
+
+For rollback, remove the new namespace route or restore the previous reviewed release pointer.
+Keep the canonical database, private configuration, and accepted operation receipts.
+Stop the single outbound home runner before a release replacement.
+Do not delete durable state or start another runner against the same journal.
+The old home-entry and callback modules remain historical isolated components, not production fallbacks.
 
 ## Private production card
 
-Use the existing blank private master and operator-verified URLs from the installed website namespace.
-Create a private JSON record with exactly `verified: true`, `invite_url`, and `short_url`.
-Both URLs must use HTTPS and the same website namespace.
-The invitation path ends with `/invite/OPAQUE_TOKEN`. The short path ends with `/s/ALIAS`.
-Only mark the record verified after an authorized check confirms both routes refer to the current invitation.
-This command renders the card without a network request or live-link creation:
+The existing card URLs continue to open this website namespace.
+Use the private master and an operator-verified JSON record with `verified: true`, `invite_url`, and `short_url`.
+Both URLs use HTTPS and the same namespace, with `/invite/OPAQUE_TOKEN` and `/s/ALIAS` paths.
+The generator does not create live links or make network requests:
 
 ```text
-python -m boomer_switch.website_card --verified-urls PRIVATE_URL_RECORD --template PRIVATE_MASTER --output PRIVATE_CARD
+python -m boomer_switch.website_card --verified-urls PRIVATE_RECORD --template PRIVATE_MASTER --output PRIVATE_CARD
 ```
 
-Install the `pdf` extra for this local card command.
-Keep the record, master, and card outside the public document root and source checkout.
-The renderer preserves the master and removes demo-only labels for this explicit production mode.
-The command prints no URLs or invitation secrets.
-
-SMTP uses a 5-second timeout for each socket operation, rather than a total send deadline.
-The PHP bridge enforces a 25-second outer process limit.
-A direct WSGI host must enforce an equivalent total request deadline before live mail.
+Install the `pdf` extra for this local command.
+The renderer protects both private inputs, preserves the master, and removes demo-only labels in production mode.
+Keep the master, record, and generated card private.

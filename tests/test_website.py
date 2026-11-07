@@ -282,7 +282,7 @@ def test_public_recovery_does_not_disclose_approval_membership(hosted):
     assert len(transport.messages) == 1 and transport.messages[0]['To'] == 'approved@example.invalid'
 
 
-def test_actual_cgi_entry_uses_fake_mail_and_composes_reference_grants(tmp_path):
+def test_actual_cgi_entry_uses_fake_mail_and_current_source_rendezvous(tmp_path):
     import os
     from pathlib import Path
     import subprocess
@@ -297,9 +297,12 @@ def test_actual_cgi_entry_uses_fake_mail_and_composes_reference_grants(tmp_path)
     private.write_text(json.dumps(config))
     inbox = tmp_path / 'fake-inbox.jsonl'
     script = "import runpy,os,json; from pathlib import Path; from boomer_switch.website_mail import SMTPTransport; SMTPTransport.send=lambda self,message: Path(os.environ['FAKE_INBOX']).open('a').write(json.dumps({'to':str(message['To']),'body':message.get_content()})+'\\n'); runpy.run_module('boomer_switch.website_cgi',run_name='__main__')"
-    def cgi(path, method='GET', body=None, cookie='', csrf='', owner=False, auth=''):
+    source_a = str(__import__('ipaddress').IPv4Address(134744072))
+    source_b = str(__import__('ipaddress').ip_address(source_a)+1)
+    def cgi(path, method='GET', body=None, cookie='', csrf='', owner=False, auth='', source=None):
         data = json.dumps(body).encode() if body is not None else b''
         env = dict(os.environ, BOOMER_PRIVATE_CONFIG=str(private), BOOMER_HTTPS='1', FAKE_INBOX=str(inbox),
+                   BOOMER_DIRECT_SOURCE='1', REMOTE_ADDR=source or source_a,
                    REQUEST_METHOD=method, PATH_INFO=path, SCRIPT_NAME='/house-lights', CONTENT_TYPE='application/json',
                    CONTENT_LENGTH=str(len(data)), HTTP_COOKIE=cookie, HTTP_ORIGIN='https://site.invalid',
                    HTTP_X_CSRF_TOKEN=csrf, HTTP_AUTHORIZATION=auth)
@@ -324,15 +327,37 @@ def test_actual_cgi_entry_uses_fake_mail_and_composes_reference_grants(tmp_path)
     owner_cookie = owner_headers['Set-Cookie'].split(';')[0]
     person = people['people'][0]
     assert cgi('/api/people','POST',{'action':'approve','email':person['email'],'revision':person['revision']},owner_cookie,people['csrf'],True)[0] == 200
-    redirect = cgi('/api/handoff','POST',{'challenge':'c'*43,'state':'s'*43},cookie,csrf)[2]['redirect']
-    code = parse_qs(urlsplit(redirect).query)['code'][0]
-    request_id = str(uuid.uuid4())
-    exchange = cgi('/exchange','POST',{'code':code,'challenge':'c'*43,'request_id':request_id},auth='Bearer '+'k'*40)[2]
-    assert exchange['request_id'] == request_id
-    grant_body = {'session':exchange['session'],'request_id':str(uuid.uuid4())}
-    assert cgi('/grant','POST',grant_body,auth='Bearer '+'k'*40)[2]['allowed'] is True
+    agent = str(uuid.uuid4())
+    def home(path, sequence, assignment=None, source=None, outcome=None):
+        body = {'agent_id':agent,'sequence':sequence,'request_id':str(uuid.uuid4())}
+        if path=='poll':
+            body['light']={'light_id':'selected-lamp','name':'Selected lamp','room':'Guest room'}
+        if assignment:
+            body |= {'operation_id':assignment['operation_id'],'generation':assignment['generation']}
+        if outcome:
+            body['outcome'] = outcome
+        return cgi('/home/'+path,'POST',body,auth='Bearer '+'k'*40,source=source)
+    assert cgi('/api/access',cookie=cookie)[2]['home_ready'] is False
+    assert home('poll',1)[0] == 200
+    assert cgi('/api/access',cookie=cookie)[2]['home_ready'] is True
+    operation_id = str(uuid.uuid4())
+    assert cgi('/api/lights','POST',{'operation_id':operation_id,'action':'read'},cookie,csrf)[0] == 202
+    assignment = home('poll',2)[2]['operation']
+    assert home('authorize',2,assignment)[2]['allowed'] is True
+    assert home('result',2,assignment,outcome={'status':'confirmed','state':'off'})[2]['accepted'] is True
+    assert cgi('/api/operations/'+operation_id,cookie=cookie)[2]['state']=='off'
+    assert cgi('/api/access',cookie=cookie,source=source_b)[2]['home_ready'] is False
+    assert home('poll',3,source=source_b)[0]==200
+    assert cgi('/api/operations/'+operation_id,cookie=cookie)[0]==403
+    access = cgi('/api/access',cookie=cookie,source=source_b)[2]
+    assert access['status']=='approved' and access['home_ready'] is True
+    new_id = str(uuid.uuid4())
+    assert cgi('/api/lights','POST',{'operation_id':new_id,'action':'read'},cookie,csrf,source=source_b)[0]==202
+    assignment = home('poll',4,source=source_b)[2]['operation']
     store.operator('revoke','guest@example.invalid')
-    assert cgi('/grant','POST',grant_body,auth='Bearer '+'k'*40)[2]['allowed'] is False
+    assert home('authorize',4,assignment,source_b)[2]['allowed'] is False
+    assert cgi('/grant','POST',{},auth='Bearer '+'k'*40)[0]==404
+    assert cgi('/exchange','POST',{},auth='Bearer '+'k'*40)[0]==404
     assert [json.loads(line)['to'] for line in inbox.read_text().splitlines()] == ['guest@example.invalid','owner@example.invalid']
 
 
@@ -368,7 +393,7 @@ from pathlib import Path
 from boomer_switch.website_mail import SMTPTransport
 config=json.loads(Path(os.environ['BOOMER_PRIVATE_CONFIG']).read_text())
 with Path(config['capture']).open('a') as target:
- target.write(json.dumps({'cookie':os.environ.get('HTTP_COOKIE'),'owner':os.environ.get('REMOTE_USER')})+'\\n')
+ target.write(json.dumps({'cookie':os.environ.get('HTTP_COOKIE'),'owner':os.environ.get('REMOTE_USER'),'peer':os.environ.get('REMOTE_ADDR'),'direct':os.environ.get('BOOMER_DIRECT_SOURCE')})+'\\n')
 def fake_send(self,message):
  with Path(config['fake_inbox']).open('a') as target:
   target.write(json.dumps({'to':str(message['To']),'body':message.get_content()})+'\\n')
@@ -390,7 +415,7 @@ raise SystemExit(module.main())
     bridge_config = tmp_path / 'config.local.php'
     bridge_config.write_text("<?php return ["+','.join(php_string(key)+'=>'+php_string(value) for key,value in {
         'python':sys.executable,'release_directory':str(release),'python_config':str(private),'mount':'/lights','owner_identity':'owner'}.items())+
-        ",'owner_authenticated'=>static fn()=>($_COOKIE['site_owner']??'')==='PRIVATE_OWNER_SENTINEL'];")
+        ",'direct_source'=>true,'owner_authenticated'=>static fn()=>($_COOKIE['site_owner']??'')==='PRIVATE_OWNER_SENTINEL'];")
     router = tmp_path / 'router.php'
     router.write_text("<?php $_SERVER['HTTPS']='on'; require "+php_string(root / 'hosting/index.php')+";")
     with socket.socket() as listener:
@@ -399,9 +424,10 @@ raise SystemExit(module.main())
     env = dict(os.environ, BOOMER_BRIDGE_CONFIG=str(bridge_config))
     process = subprocess.Popen([str(php),'-n','-S',f'localhost:{port}',str(router)],cwd=tmp_path,env=env,
                                stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
-    def http(path, body=None, cookie='', csrf=''):
+    def http(path, body=None, cookie='', csrf='', extra=None):
         connection = HTTPConnection('localhost',port,timeout=5)
         headers = {'Cookie':cookie,'Origin':'https://site.invalid','X-CSRF-Token':csrf,'Content-Type':'application/json'}
+        headers.update(extra or {})
         try:
             connection.request('POST' if body is not None else 'GET','/lights'+path,json.dumps(body) if body is not None else None,headers)
             response = connection.getresponse()
@@ -432,6 +458,12 @@ raise SystemExit(module.main())
         captured = capture.read_text()
         assert 'PRIVATE_OWNER_SENTINEL' not in captured and 'PRIVATE_OTHER_SENTINEL' not in captured and 'malformed' not in captured
         assert any(json.loads(line)['owner']=='owner' for line in captured.splitlines())
+        import ipaddress
+        normal = json.loads(captured.splitlines()[0])
+        assert normal['direct']=='1' and ipaddress.ip_address(normal['peer']).is_loopback
+        assert http('/api/access',cookie=cookie,extra={'X-Forwarded-For':'forged-source'})[0]==200
+        rejected = json.loads(capture.read_text().splitlines()[-1])
+        assert rejected['direct']=='0' and rejected['peer']==normal['peer']
     finally:
         process.terminate()
         process.wait(timeout=5)
