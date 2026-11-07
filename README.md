@@ -5,7 +5,7 @@ A mobile-friendly web page that lets invited, owner-approved guests turn househo
 **Status:** planning
 
 ## Goals
-- Guests on the home guest Wi-Fi control selected lights from a normal browser and a bookmark.
+- Guests on the home's main Wi-Fi or guest Wi-Fi control selected lights from a browser and a bookmark.
 - Lights grouped by room with recognizable names (e.g. "Lamp beside the sofa"), large On/Off controls.
 - State shown is what the device reports; "Unavailable" when it cannot be confirmed.
 - Invitation + verified email + owner approval; access revocable, optional end date.
@@ -13,7 +13,8 @@ A mobile-friendly web page that lets invited, owner-approved guests turn househo
 ## Architecture
 - **Guest web app** — House Lights page and registration flow.
 - **Home service** — always-on home server running [python-kasa](https://github.com/python-kasa/python-kasa) on the main network; holds device credentials and a server-enforced device allowlist. Only the guest service is published via [Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel) (no port forwarding, no fixed public IP).
-- **Owner admin** — private People page on the owner's website, behind the owner's sign-in. The website manages permissions; the home service checks them on every command and fails closed.
+- **Owner admin** — private People page on the owner's website, behind the owner's sign-in. The website manages permissions and sends verification codes and owner notices through its existing mail system.
+- **Command checks** — the home service must verify current website permission before each command. It must also confirm that the guest uses the home's main Wi-Fi or guest Wi-Fi. Each command must fail closed if either check fails or cannot confirm access. Remote control is not allowed.
 
 See [docs/BRIEF.md](docs/BRIEF.md) for the full brief and [AGENTS.md](AGENTS.md) for contribution rules.
 
@@ -61,9 +62,12 @@ Use `--durations 10 --slow-threshold 1` for a duration report.
 The runner uses separate temporary paths and parallel workers. The tests never contact real devices.
 The runner rejects overrides for its temporary paths, cache directory, and pytest `addopts`.
 
-## Open decisions
-- Email delivery method for one-time codes
-- Owner notification channel
-- Website ↔ home-service permission check (must fail closed)
-- Strict home-only rule vs. remote use while access is active
-- License (none chosen yet)
+## License
+
+This project uses the [MIT License](LICENSE).
+
+## Validation still required
+
+The exact method to confirm guest presence on the home's main Wi-Fi or guest Wi-Fi still requires implementation and validation.
+Authenticated HTTPS remains a proposed transport for the website permission check.
+The transport and authentication method still require validation before implementation.
