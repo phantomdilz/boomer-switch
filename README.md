@@ -73,12 +73,61 @@ For synthetic external changes, send JSON to `POST /demo/fixtures`:
 Use `off` for an external off state or `unavailable` for a persistent sample failure.
 These fixtures affect only the sample devices.
 
+## Local registration demo
+
+Install `.[dev,demo]` in a local virtual environment for the registration demo and its optional Firefox checks.
+Run `python -m boomer_switch.registration_demo serve --state-dir data/registration-demo --port 0`.
+The command prints a loopback address and uses fixed sample lights.
+The existing mobile demo remains separate and usable.
+Stop either demo with Ctrl+C.
+
+Use the same ignored state directory for these local operator commands:
+
+- `python -m boomer_switch.registration_demo operator --state-dir data/registration-demo card --base-url http://localhost:PORT`
+- `python -m boomer_switch.registration_demo operator --state-dir data/registration-demo mail --email sample@example.invalid`
+- `python -m boomer_switch.registration_demo operator --state-dir data/registration-demo approve --email sample@example.invalid`
+- `python -m boomer_switch.registration_demo operator --state-dir data/registration-demo revoke --email sample@example.invalid`
+- `python -m boomer_switch.registration_demo operator --state-dir data/registration-demo expire --email sample@example.invalid`
+- `python -m boomer_switch.registration_demo operator --state-dir data/registration-demo rotate`
+
+Replace `PORT` with the printed demo port.
+The card command returns a local printable HTML path, the invitation URL, and its short URL.
+The QR holds the full invitation URL. The short alias joins 4 independently selected English words without spaces or hyphens.
+The card shows the words separately to help the guest type them.
+
+Segno creates the QR locally. The MIT-licensed `mnemonic` package supplies the 2048-word English list.
+Neither operation contacts an external service.
+
+Open either card URL, enter a sample name and email, then verify the code from the fake mailbox.
+Only local operator commands can read fake mail or approve a sample guest.
+There is no public mailbox or approval endpoint.
+The waiting page opens the controls after approval. The bookmark remains `/guest` without an invitation secret.
+An approved guest on another browser can open that bookmark and verify the same email again.
+
+The SQLite file preserves invitations, sessions, challenges, budgets, approvals, and fake mail across restarts.
+Keep the state directory and printed card private and out of Git.
+Rotation retires the old invitation and short alias. It preserves verified bookmarks and approvals.
+The registration server checks current approval, expiration, and revocation before each control command.
+The local `approve` hook also accepts an optional finite Unix timestamp with `--expires-at`.
+
+Codes expire after 5 minutes.
+Each email has at most 5 verification attempts and 3 code sends per 15-minute window, with a 30-second resend delay.
+The whole demo also permits at most 20 code sends per 15-minute window across all emails.
+These counters survive restarts and rotation. Unverified requests never create a pending guest or an owner notice.
+
+Each verified pending request sends one fake owner notice. Repeated verification does not duplicate that notice.
+
+This is a synthetic registration slice, not the real guest service.
+It does not read `.env` or private device configuration, deliver mail, or contact a website or shortener.
+It cannot control physical devices.
+Real website permission and local Wi-Fi presence still require validation. Unknown permission or presence must deny any future real command.
+
 ## Synthetic tests
 
 Use Python 3.11 or later.
 Install the development dependencies in a local virtual environment with `python -m pip install -e ".[dev]"`.
 Run `python run_tests.py full --workers 2` from that environment.
-The `smoke`, `lights`, `demo`, and `tooling` tiers also accept ordinary pytest selectors.
+The `smoke`, `lights`, `demo`, `registration`, and `tooling` tiers also accept ordinary pytest selectors.
 Use `--durations 10 --slow-threshold 1` for a duration report.
 
 The runner uses separate temporary paths and parallel workers. The tests never contact real devices.

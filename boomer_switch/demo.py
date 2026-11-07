@@ -78,14 +78,17 @@ class _DemoHandler(BaseHTTPRequestHandler):
         # Keep request data out of local logs.
         pass
 
-    def _reply(self, status, body, content_type="application/json"):
+    def _reply(self, status, body, content_type="application/json", *, headers=()):
         payload = json.dumps(body).encode() if content_type == "application/json" else body
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'none'")
+        for name, value in headers:
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(payload)
 
@@ -127,12 +130,15 @@ class _DemoHandler(BaseHTTPRequestHandler):
             if set(body) != {"action"}:
                 raise ValueError
             light_id = self.path[len(prefix):]
-            state = self.server._runner.run(self.server._service.command(light_id, body["action"]))
-            self._reply(200, {"light_id": light_id, "state": str(state)})
+            self._command(light_id, body["action"])
         except CommandDenied:
             self._reply(403, {"error": "Select an allowed light and action."})
         except (ValueError, TypeError):
             self._reply(400, {"error": "Use a valid sample request."})
+
+    def _command(self, light_id, action):
+        state = self.server._runner.run(self.server._service.command(light_id, action))
+        self._reply(200, {"light_id": light_id, "state": str(state)})
 
 
 def main():
