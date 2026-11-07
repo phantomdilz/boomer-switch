@@ -149,15 +149,15 @@ class LightService:
             for light in self._lights.values()
         )
 
-    async def state(self, light_id: str) -> LightState:
-        return await self._operate(light_id, None)
+    async def state(self, light_id: str, *, guard=None) -> LightState:
+        return await self._operate(light_id, None, guard)
 
-    async def command(self, light_id: str, action: str) -> LightState:
+    async def command(self, light_id: str, action: str, *, guard=None) -> LightState:
         if action not in ("on", "off"):
             raise CommandDenied("Use on or off.")
-        return await self._operate(light_id, action)
+        return await self._operate(light_id, action, guard)
 
-    async def _operate(self, light_id: str, action: str | None) -> LightState:
+    async def _operate(self, light_id: str, action: str | None, guard=None) -> LightState:
         if not isinstance(light_id, str) or light_id not in self._lights:
             raise CommandDenied("Select an allowed light.")
         light = self._lights[light_id]
@@ -168,6 +168,8 @@ class LightService:
                 target = _target(parent, light)
                 if target is None:
                     return LightState.UNAVAILABLE
+                if guard is not None:
+                    await guard()
                 if action is not None:
                     if action == "on":
                         await target.turn_on()
@@ -182,6 +184,8 @@ class LightService:
                 if type(observed) is not bool:
                     return LightState.UNAVAILABLE
                 return LightState.ON if observed else LightState.OFF
+        except CommandDenied:
+            raise
         except Exception:
             # A failed command can have reached the device. Never retry here.
             return LightState.UNAVAILABLE
