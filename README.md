@@ -142,6 +142,9 @@ The full acceptance script requires an explicit private template path and decode
 
 ## Real guest acceptance blockers
 
+The [private pilot backend milestone](docs/PILOT_BACKEND.md) adds guarded provider and website-grant adapters plus a finite harmless phone-to-spare reachability check.
+Its guest-side proof producer, browser session handoff, certificates, and real hosting remain open.
+
 The local checks do not establish the physical guest-phone acceptance criteria.
 These integrations and observations remain unavailable:
 
