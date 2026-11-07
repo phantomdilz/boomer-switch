@@ -2,7 +2,7 @@
 
 A mobile-friendly web page that lets invited, owner-approved guests turn household smart lights on and off from a phone browser. No app install, no shared owner credentials, no reaching for a lamp's physical switch.
 
-**Status:** planning
+**Status:** local sample-light demo. Guest access remains planned.
 
 ## Goals
 - Guests on the home guest Wi-Fi control selected lights from a normal browser and a bookmark.
@@ -50,12 +50,35 @@ The future server caller must check current guest permission before each call.
 It must keep the resolver and local configuration private.
 Local synthetic tests do not establish compatibility with installed hardware.
 
+## Local mobile demo
+
+Run `python -m boomer_switch.demo --port 0` from the local virtual environment.
+Open the loopback URL that the command prints.
+The page groups sample lights by room and shows their confirmed state.
+Choose On or Off to control one sample light.
+
+The page checks state every 3 seconds while visible. Each request has a 3-second timeout.
+Failed requests show Unavailable. The page never assumes that a command succeeded.
+
+This demo uses only fixed sample devices in memory.
+It binds only to loopback and has no real-device or private-configuration option.
+It does not implement guest access. A real guest service still requires the planned permission checks.
+Stop the demo with Ctrl+C.
+
+The optional `demo` extra declares Playwright for `demos/mobile_acceptance.py`.
+That script checks the mobile page with Firefox and uses only sample devices.
+
+For synthetic external changes, send JSON to `POST /demo/fixtures`:
+`{"light_id":"sofa-lamp","state":"on"}`.
+Use `off` for an external off state or `unavailable` for a persistent sample failure.
+These fixtures affect only the sample devices.
+
 ## Synthetic tests
 
 Use Python 3.11 or later.
 Install the development dependencies in a local virtual environment with `python -m pip install -e ".[dev]"`.
 Run `python run_tests.py full --workers 2` from that environment.
-The `smoke`, `lights`, and `tooling` tiers also accept ordinary pytest selectors.
+The `smoke`, `lights`, `demo`, and `tooling` tiers also accept ordinary pytest selectors.
 Use `--durations 10 --slow-threshold 1` for a duration report.
 
 The runner uses separate temporary paths and parallel workers. The tests never contact real devices.

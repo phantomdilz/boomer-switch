@@ -10,15 +10,20 @@ description = "Local control of owner-selected lights"
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "pytest-xdist>=3,<4"]
+demo = ["playwright==1.62.0"]
 
 [tool.setuptools.packages.find]
 include = ["boomer_switch*"]
+
+[tool.setuptools.package-data]
+boomer_switch = ["web/*.html", "web/*.css", "web/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-markers"
 markers = [
   "lights: device selection and control boundary",
+  "demo: local sample-light web service",
   "tooling: test infrastructure checks",
   "smoke: fast deterministic acceptance checks",
 ]
