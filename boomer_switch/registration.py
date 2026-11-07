@@ -3,7 +3,6 @@
 from contextlib import contextmanager
 import hashlib
 import hmac
-import math
 from pathlib import Path
 import re
 import secrets
@@ -13,6 +12,10 @@ import time
 
 class AccessDenied(ValueError):
     """The request cannot establish current access."""
+
+
+class StalePerson(ValueError):
+    """The owner action does not match the current person record."""
 
 
 def _digest(value: str) -> str:
@@ -56,6 +59,11 @@ class RegistrationStore:
                 CREATE TABLE IF NOT EXISTS budget (
                     id INTEGER PRIMARY KEY CHECK(id=1), started REAL NOT NULL, sends INTEGER NOT NULL);
             """)
+            db.execute("BEGIN IMMEDIATE")
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(guests)")}
+            if "email_verified" not in columns:
+                # Existing guest rows came only from successful inbox verification.
+                db.execute("ALTER TABLE guests ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 1")
             for key, value in (("invitation", secrets.token_urlsafe(32)),
                                ("alias", self._alias()), ("key", secrets.token_hex(32))):
                 db.execute("INSERT OR IGNORE INTO settings VALUES (?, ?)", (key, value))
@@ -188,13 +196,18 @@ class RegistrationStore:
     def start(self, raw, name, email):
         if not isinstance(name, str) or not 1 <= len(name.strip()) <= 80:
             raise AccessDenied("Enter a name of at most 80 characters.")
-        if not isinstance(email, str) or not re.fullmatch(r"[^\s@]{1,64}@[^\s@.]{1,120}(?:\.[^\s@.]{1,63})+", email) or len(email) > 254:
-            raise AccessDenied("Enter a valid email address.")
+        email = self._email(email)
         with self._transaction() as db:
             session = self._session(db, raw)
             if session["verified"]:
                 raise AccessDenied("This browser already verified its email.")
-            self._issue(db, session, name.strip(), email.lower())
+            self._issue(db, session, name.strip(), email)
+
+    @staticmethod
+    def _email(email):
+        if not isinstance(email, str) or not re.fullmatch(r"[^\s@]{1,64}@[^\s@.]{1,120}(?:\.[^\s@.]{1,63})+", email) or len(email) > 254:
+            raise AccessDenied("Enter a valid email address.")
+        return email.lower()
 
     def resend(self, raw):
         with self._transaction() as db:
@@ -226,7 +239,11 @@ class RegistrationStore:
             if guest is None:
                 db.execute("INSERT INTO guests(email,name,status) VALUES (?,?,'pending')", (challenge["email"], challenge["name"]))
             elif not self._active(guest) and guest["status"] != "pending":
-                db.execute("UPDATE guests SET name=?,status='pending',expires=NULL,revision=revision+1 WHERE email=?", (challenge["name"], challenge["email"]))
+                db.execute("DELETE FROM sessions WHERE email=?", (challenge["email"],))
+                db.execute("DELETE FROM challenges WHERE email=?", (challenge["email"],))
+                db.execute("UPDATE guests SET name=?,status='pending',expires=NULL,email_verified=1,revision=revision+1 WHERE email=?", (challenge["name"], challenge["email"]))
+            elif not guest["email_verified"]:
+                db.execute("UPDATE guests SET name=?,email_verified=1,revision=revision+1 WHERE email=?", (challenge["name"], challenge["email"]))
             guest = db.execute("SELECT * FROM guests WHERE email=?", (challenge["email"],)).fetchone()
             if guest["status"] == "pending":
                 db.execute("INSERT OR IGNORE INTO mailbox(kind,email,name,reference,created_at) VALUES ('owner_notice',?,?,?,?)",
@@ -235,22 +252,72 @@ class RegistrationStore:
             db.execute("DELETE FROM challenges WHERE session=?", (session["id"],))
 
     def operator(self, action, email, *, expires=None):
-        if expires is not None and not math.isfinite(expires):
-            raise ValueError("Use a finite expiration time.")
+        self._expiration(expires)
         with self._transaction() as db:
             guest = db.execute("SELECT * FROM guests WHERE email=?", (email.lower(),)).fetchone()
             if guest is None:
                 raise AccessDenied("Verify the sample guest first.")
             if action == "approve":
-                db.execute("UPDATE guests SET status='approved', expires=? WHERE email=?", (expires, email.lower()))
+                if guest["status"] == "approved" and not self._active(guest):
+                    db.execute("DELETE FROM sessions WHERE email=?", (email.lower(),))
+                    db.execute("DELETE FROM challenges WHERE email=?", (email.lower(),))
+                db.execute("UPDATE guests SET status='approved', expires=?, revision=revision+1 WHERE email=?", (expires, email.lower()))
             elif action == "revoke":
-                db.execute("UPDATE guests SET status='revoked' WHERE email=?", (email.lower(),))
+                db.execute("UPDATE guests SET status='revoked', revision=revision+1 WHERE email=?", (email.lower(),))
                 db.execute("DELETE FROM sessions WHERE email=?", (email.lower(),))
                 db.execute("DELETE FROM challenges WHERE email=?", (email.lower(),))
             elif action == "expire":
-                db.execute("UPDATE guests SET expires=? WHERE email=?", (self.clock() - 1, email.lower()))
+                db.execute("UPDATE guests SET expires=?, revision=revision+1 WHERE email=?", (self.clock() - 1, email.lower()))
+                db.execute("DELETE FROM sessions WHERE email=?", (email.lower(),))
+                db.execute("DELETE FROM challenges WHERE email=?", (email.lower(),))
             else:
                 raise ValueError("Use a supported demo operator action.")
+
+    def people(self):
+        with self._transaction() as db:
+            return [dict(row) | {"email_verified": bool(row["email_verified"])}
+                    for row in db.execute("SELECT email,name,status,expires,revision,email_verified FROM guests ORDER BY email")]
+
+    @staticmethod
+    def _expiration(expires):
+        # Bound Unix timestamps before float conversion, including oversized JSON integers.
+        if expires is not None and (type(expires) not in (int, float) or not -62135596800 <= expires <= 253402300799):
+            raise ValueError("Use a finite end date within years 1 through 9999.")
+
+    def change_person(self, action, email, revision, *, expires=None):
+        """Commit one versioned owner decision without replay or stale overwrite."""
+        email = self._email(email)
+        if action not in ("preapprove", "approve", "deny", "remove", "expiry"):
+            raise ValueError("Use a supported People action.")
+        self._expiration(expires)
+        if action != "expiry" and expires is not None:
+            raise ValueError("Use the end-date action to change a deadline.")
+        with self._transaction() as db:
+            current = db.execute("SELECT * FROM guests WHERE email=?", (email,)).fetchone()
+            if current is None:
+                if action != "preapprove" or revision is not None:
+                    raise StalePerson("Refresh People before this action.")
+                db.execute("INSERT INTO guests(email,name,status,email_verified) VALUES (?,'','approved',0)", (email,))
+                return
+            if type(revision) is not int or revision != current["revision"]:
+                raise StalePerson("This person changed. Refresh People before this action.")
+            if action == "preapprove":
+                if current["status"] not in ("denied", "revoked"):
+                    raise StalePerson("This person already has a current request or approval.")
+                db.execute("UPDATE guests SET status='approved',expires=NULL,revision=revision+1 WHERE email=?", (email,))
+            elif action == "approve" and current["status"] == "pending" and current["email_verified"]:
+                db.execute("UPDATE guests SET status='approved',expires=NULL,revision=revision+1 WHERE email=?", (email,))
+            elif action in ("deny", "remove") and current["status"] == ("pending" if action == "deny" else "approved"):
+                db.execute("UPDATE guests SET status=?,revision=revision+1 WHERE email=?", ("denied" if action == "deny" else "revoked", email))
+                db.execute("DELETE FROM sessions WHERE email=?", (email,))
+                db.execute("DELETE FROM challenges WHERE email=?", (email,))
+            elif action == "expiry" and current["status"] == "approved":
+                if not self._active(current) or (expires is not None and expires <= self.clock()):
+                    db.execute("DELETE FROM sessions WHERE email=?", (email,))
+                    db.execute("DELETE FROM challenges WHERE email=?", (email,))
+                db.execute("UPDATE guests SET expires=?,revision=revision+1 WHERE email=?", (expires, email))
+            else:
+                raise StalePerson("This action no longer matches the person's status.")
 
     def mailbox(self, email):
         with self._transaction() as db:

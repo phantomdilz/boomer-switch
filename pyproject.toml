@@ -13,6 +13,7 @@ license-files = ["LICENSE"]
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "pytest-xdist>=3,<4", "segno==1.6.6", "mnemonic==0.21"]
 demo = ["playwright==1.62.0", "segno==1.6.6", "Pillow==13.0.0", "zxing-cpp==3.1.1", "mnemonic==0.21"]
+website = ["mnemonic==0.21"]
 
 [tool.setuptools.packages.find]
 include = ["boomer_switch*"]
@@ -27,6 +28,7 @@ markers = [
   "lights: device selection and control boundary",
   "demo: local sample-light web service",
   "registration: invitations, verification, and demo access",
+  "people: private owner access management",
   "tooling: test infrastructure checks",
   "smoke: fast deterministic acceptance checks",
 ]
