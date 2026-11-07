@@ -11,12 +11,14 @@ from pathlib import Path
 import re
 import secrets
 import socket
+from socketserver import ThreadingMixIn
 import ssl
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
 from threading import Thread
-from wsgiref.simple_server import WSGIRequestHandler, make_server
+from wsgiref.simple_server import WSGIRequestHandler, WSGIServer, make_server
+from urllib.parse import urlsplit
 
 from aiohttp import web
 from cryptography import x509
@@ -45,6 +47,26 @@ if not ipaddress.ip_address(LOOPBACK).is_loopback:
     raise RuntimeError("Localhost must resolve to loopback.")
 
 
+def check(condition: bool, label: str, detail: str = "") -> None:
+    global STEP
+    STEP = label
+    print(f"CHECK: {label}{': ' + detail if detail else ''}", flush=True)
+    if not condition:
+        raise AssertionError
+
+
+class FixtureServer(ThreadingMixIn, WSGIServer):
+    daemon_threads = True
+
+    def handle_error(self, _request, _client_address):
+        print(f"CHECK: fixture request error ({type(sys.exception()).__name__})", flush=True)
+
+    def get_request(self):
+        connection, address = super().get_request()
+        connection.settimeout(5)
+        return connection, address
+
+
 class QuietHandler(WSGIRequestHandler):
     def log_message(self, *_args):
         pass
@@ -70,7 +92,8 @@ class SyntheticRelay:
     async def forward(self, method, path, body, session, deadline):
         if not self.grants.deadline(session):
             return 403, b'{"error":"Access unavailable."}'
-        assert method == "GET" and path == "/api/lights" and not body
+        if method != "GET" or path != "/api/lights" or body:
+            raise ValueError("Unsupported synthetic relay request")
         return 200, b'{"lights":[{"light_id":"pilot-lamp","name":"Sample lamp","room":"Sample room","state":"off"}]}'
 
 
@@ -107,7 +130,7 @@ def run() -> None:
         mail = WebsiteMail(store, inbox, "sender@example.invalid", "owner@example.invalid")
         owner_fixture = secrets.token_urlsafe(32)
         service_key = secrets.token_urlsafe(40)
-        website_server = make_server(LOOPBACK, 0, lambda *_: [], handler_class=QuietHandler)
+        website_server = make_server(LOOPBACK, 0, lambda *_: [], server_class=FixtureServer, handler_class=QuietHandler)
         website_server.socket = tls.wrap_socket(website_server.socket, server_side=True)
         website_origin = f"https://{LOOPBACK}:{website_server.server_port}"
         guest_socket = socket.socket()
@@ -170,7 +193,8 @@ def run() -> None:
         guest_thread = Thread(target=serve_guest, daemon=True)
         guest_thread.start()
         try:
-            assert started.wait(10) and not errors
+            ready = started.wait(10)
+            check(ready and not errors, "fixture startup", f"ready={ready} errors={len(errors)}")
             STEP = "synthetic printed card"
             template, output = root / "synthetic-template.pdf", root / "card.pdf"
             canvas = Canvas(str(template), pagesize=(612, 792))
@@ -184,10 +208,10 @@ def run() -> None:
             render_hosted_card(template, output, {"verified": True, "invite_url": invite_url, "short_url": short_url})
             raster = subprocess.run(["pdftoppm", "-png", "-r", "144", str(output), str(root / "page")],
                                     capture_output=True, timeout=30, check=False)
-            assert raster.returncode == 0
+            check(raster.returncode == 0, "render card", f"exit={raster.returncode}")
             with Image.open(root / "page-1.png") as image:
                 qr = zxingcpp.read_barcodes(image)
-            assert len(qr) == 1 and qr[0].text == invite_url
+            check(len(qr) == 1 and qr[0].text == invite_url, "card QR", f"count={len(qr)}")
             with sync_playwright() as playwright:
                 browser = playwright.firefox.launch()
                 try:
@@ -206,9 +230,9 @@ def run() -> None:
                     guest.locator("#details button").click()
                     guest.locator("#code").wait_for(state="visible")
                     messages = [m for m in inbox.messages if str(m["To"]) == EMAIL]
-                    assert messages
+                    check(bool(messages), "fake mailbox", f"messages={len(messages)}")
                     code = re.search(r"\b[0-9]{6}\b", messages[-1].get_content())
-                    assert code
+                    check(code is not None, "fake verification code", f"present={code is not None}")
                     guest.locator("#code").fill(code.group())
                     guest.locator("#verification button[type=submit], #verification button:not([type])").first.click()
                     guest.get_by_text("Waiting for approval", exact=True).wait_for(state="visible")
@@ -220,38 +244,69 @@ def run() -> None:
                     row = owner.locator(f'[data-email="{EMAIL}"]')
                     row.wait_for(state="visible", timeout=15000)
                     row.locator('[data-action="approve"]').click()
+                    STEP = "owner approval visible"
                     expect(row).to_have_attribute("data-status", "approved", timeout=15000)
-                    STEP = "cross-site guest handoff"
+                    STEP = "website session before cross-site handoff"
                     guest.bring_to_front()
                     guest.locator("#connect").wait_for(state="visible", timeout=15000)
-                    with guest.expect_response(lambda response: response.url == guest_origin + "/auth/start") as started_response:
-                        guest.locator("#connect").click()
-                    assert started_response.value.status == 303
+                    website_cookies = [c for c in guest_context.cookies(website_mount) if c["name"] == "bs_session"]
+                    check(len(website_cookies) == 1, "website cookie before handoff", f"count={len(website_cookies)}")
+                    website_cookie = website_cookies[0]
+                    check(website_cookie["secure"] and website_cookie["httpOnly"] and website_cookie["sameSite"] == "Strict",
+                          "website cookie attributes", "secure, HttpOnly and Strict required")
+                    check(urlsplit(guest_origin).hostname == "localhost" and urlsplit(website_origin).hostname == LOOPBACK,
+                          "distinct fixture sites", "localhost and loopback-address hosts required")
+                    STEP = "cross-site navigation from home start"
+                    with guest.expect_response(lambda response: response.url.split("#")[0] == website_mount + "/guest") as returned_website:
+                        with guest.expect_response(lambda response: response.url == guest_origin + "/auth/start") as started_response:
+                            guest.locator("#connect").click()
+                    start_status = started_response.value.status
+                    check(start_status == 303, "home start response", f"HTTP={start_status}")
+                    website_request = returned_website.value.request
+                    previous = website_request.redirected_from
+                    check(previous is not None and previous.url == guest_origin + "/auth/start",
+                          "actual home-to-website navigation", f"redirects={int(previous is not None)}")
+                    metadata = cross_site_visits[-1] if cross_site_visits else ""
+                    metadata = metadata if metadata in ("same-origin", "same-site", "cross-site", "none") else "absent-or-other"
+                    print(f"CHECK: browser fetch metadata: {metadata}", flush=True)
                     guest.wait_for_url(website_mount + "/guest", timeout=15000)
+                    STEP = "approved status after cross-site return"
                     expect(guest.locator("#status")).to_contain_text("Access approved", timeout=15000)
-                    assert "cross-site" in cross_site_visits
+                    returned_cookies = [c for c in guest_context.cookies(website_mount) if c["name"] == "bs_session"]
+                    check(len(returned_cookies) == 1 and returned_cookies[0]["value"] == website_cookie["value"],
+                          "approved website session survived navigation", f"cookies={len(returned_cookies)}")
                     stranger = context()
                     wrong_browser_status = []
+                    pending_after_wrong = []
                     def check_browser_binding(route):
+                        global STEP
+                        STEP = "wrong-browser callback before valid browser"
                         wrong_browser_status.append(stranger.request.get(route.request.url, max_redirects=0).status)
+                        pending_after_wrong.append(len(proxy.pending))
+                        check(wrong_browser_status == [403], STEP, f"HTTP={wrong_browser_status[-1]}")
+                        check(pending_after_wrong == [1], "valid browser binding retained", f"pending={pending_after_wrong[-1]}")
                         route.continue_()
                     guest.route(guest_origin + "/auth/callback?*", check_browser_binding)
+                    STEP = "valid browser callback"
                     with guest.expect_response(lambda response: response.url.startswith(guest_origin + "/auth/callback?")) as callback_response:
                         guest.locator("#connect").click()
-                    assert wrong_browser_status == [403]
+                    check(len(wrong_browser_status) == 1, "wrong-browser check observed", f"attempts={len(wrong_browser_status)}")
                     callback_url = callback_response.value.url
-                    assert callback_response.value.status == 303
+                    callback_status = callback_response.value.status
+                    check(callback_status == 303, "valid callback response", f"HTTP={callback_status}")
                     guest.wait_for_url(guest_origin + "/", timeout=15000)
                     guest.locator('[data-light-id="pilot-lamp"]').wait_for(state="visible", timeout=15000)
-                    assert not guest.url.endswith("/auth/callback") and "?" not in guest.url
-                    STEP = "clean bookmark and one-use binding"
+                    check(guest.url == guest_origin + "/", "home URL is clean")
+                    STEP = "reopen clean home bookmark"
                     bookmark = guest_context.new_page()
                     bookmark.goto(guest_origin + "/", wait_until="domcontentloaded")
                     bookmark.locator('[data-light-id="pilot-lamp"]').wait_for(state="visible", timeout=15000)
-                    assert bookmark.url == guest_origin + "/"
-                    assert not proxy.pending
-                    assert guest.request.get(callback_url, max_redirects=0).status == 403
-                    assert stranger.request.get(callback_url, max_redirects=0).status == 403
+                    check(bookmark.url == guest_origin + "/", "bookmark URL is clean")
+                    check(not proxy.pending, "browser binding consumed", f"pending={len(proxy.pending)}")
+                    replay_status = guest.request.get(callback_url, max_redirects=0).status
+                    check(replay_status == 403, "callback replay rejected", f"HTTP={replay_status}")
+                    second_status = stranger.request.get(callback_url, max_redirects=0).status
+                    check(second_status == 403, "other browser replay rejected", f"HTTP={second_status}")
                     stranger.close()
                     print("PASS: synthetic card, hosted registration, owner approval, cross-site handoff, one-use binding, clean bookmark")
                 finally:
