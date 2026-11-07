@@ -241,14 +241,9 @@ def load_guest(path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run the private Windows guest Wi-Fi HTTPS entry point.")
-    parser.add_argument("--config", type=Path, required=True)
-    options = parser.parse_args()
-    try:
-        proxy, address, port, tls = load_guest(options.config)
-    except Exception:
-        parser.error("Read a valid explicit private guest configuration and its TLS files.")
-    web.run_app(proxy.application(), host=address, port=port, ssl_context=tls, access_log=None, print=None)
+    parser = argparse.ArgumentParser(description="The Windows guest proxy is retired. Use the outbound home runner.")
+    parser.parse_args()
+    parser.error("Use python -m boomer_switch.home_runner with the private home configuration. No guest listener is needed.")
 
 
 if __name__ == "__main__":
