@@ -1,4 +1,5 @@
 import hashlib
+import errno
 import json
 import os
 from pathlib import Path
@@ -121,9 +122,50 @@ def test_html_publication_does_not_follow_an_existing_output_link(tmp_path):
     keep = tmp_path / "keep.txt"
     keep.write_text("SYNTHETIC_KEEP", encoding="utf-8")
     os.link(keep, state / "card.html")
-    printable_card(RegistrationStore(state), state, "http://localhost:12345")
+    result = printable_card(RegistrationStore(state), state, "http://localhost:12345")
     assert keep.read_text(encoding="utf-8") == "SYNTHETIC_KEEP"
     assert "House Lights" in (state / "card.html").read_text(encoding="utf-8")
+    assert Path(result["printable_card"]) == state / "card.html"
+
+
+def test_html_symlink_is_replaced_before_the_returned_card_path_is_resolved(tmp_path):
+    state = tmp_path / "state"
+    state.mkdir()
+    keep = tmp_path / "keep.txt"
+    keep.write_text("SYNTHETIC_KEEP", encoding="utf-8")
+    try:
+        (state / "card.html").symlink_to(keep)
+    except OSError as error:
+        if getattr(error, "winerror", None) in (5, 1314) or error.errno in (errno.ENOTSUP, errno.EOPNOTSUPP):
+            pytest.skip("This host does not permit file symlinks.")
+        raise
+    result = printable_card(RegistrationStore(state), state, "http://localhost:12345")
+    assert Path(result["printable_card"]) == state / "card.html"
+    assert "House Lights" in Path(result["printable_card"]).read_text(encoding="utf-8")
+    assert keep.read_text(encoding="utf-8") == "SYNTHETIC_KEEP"
+    assert not (state / "card.html").is_symlink()
+
+
+def test_returned_html_path_uses_new_file_after_leaf_resolution_changes(tmp_path, monkeypatch):
+    state = tmp_path / "state"
+    state.mkdir()
+    card = state / "card.html"
+    card.write_bytes(b"SYNTHETIC_LINK_TARGET")
+    keep = tmp_path / "keep.txt"
+    keep.write_text("SYNTHETIC_KEEP", encoding="utf-8")
+    original_resolve = Path.resolve
+
+    def resolve_leaf(path, *args, **kwargs):
+        if path == card and path.read_bytes() == b"SYNTHETIC_LINK_TARGET":
+            return original_resolve(keep)
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", resolve_leaf)
+    assert card.resolve() == original_resolve(keep)
+    result = printable_card(RegistrationStore(state), state, "http://localhost:12345")
+    assert Path(result["printable_card"]) == original_resolve(card)
+    assert "House Lights" in card.read_text(encoding="utf-8")
+    assert keep.read_text(encoding="utf-8") == "SYNTHETIC_KEEP"
 
 
 @pytest.mark.parametrize("kind", ["one-page", "wrong-size", "rotated", "encrypted"])

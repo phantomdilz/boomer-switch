@@ -136,7 +136,7 @@ def printable_card(store, directory, base_url, *, pdf_template=None):
         '<p>Scan the code or enter this short link:</p><p>' + html.escape(short_url) +
         '</p><p>Keyword words: ' + html.escape(invitation["words"]) +
         '</p><p>Type the words together without spaces.</p><p>Sample lights only.</p></html>')
-    result = {"invite_url": invite_url, "short_url": short_url, "printable_card": str(card.resolve())}
+    result = {"invite_url": invite_url, "short_url": short_url}
     if pdf_template is not None:
         from .invitation_pdf import render_invitation_pdf
 
@@ -147,6 +147,7 @@ def printable_card(store, directory, base_url, *, pdf_template=None):
             temporary = Path(file.name)
             file.write(markup)
         temporary.replace(card)
+        result["printable_card"] = str(card.resolve())
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
