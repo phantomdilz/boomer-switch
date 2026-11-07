@@ -2,7 +2,9 @@
 
 `boomer_switch.people.create_people_application` creates the reusable People application for an authenticated WSGI website.
 The website owns People permissions. Device credentials and control remain outside this component.
-Production hosting and the website-to-home permission transport remain unverified and undeployed.
+Production hosting remains unverified and undeployed.
+The current website-first transport is defined in [Hosted registration and controls](HOSTED_REGISTRATION.md).
+The standalone WSGI factory below retains its original authentication contract for isolated consumers.
 Install the `website` extra for this component's runtime dependency without the browser demo tools.
 
 ## Required hosting contract
@@ -45,7 +47,7 @@ application = create_people_application(
 
 Keep the configured identity and state directory in private server configuration.
 The example does not create sign-in, configure a reverse proxy, or establish the real permission transport.
-Unknown website permission or local Wi-Fi presence must still deny any future real-device command.
+Unknown website permission or current home internet source must still deny any future real-device command.
 
 ## People decisions
 
@@ -62,4 +64,13 @@ The owner can change or clear a future deadline without loss of active access.
 After expiration, restoration requires fresh inbox proof and invalidates sessions and codes from the prior grant.
 
 The local demonstration shares SQLite only to verify the permission consumer through ordinary guest commands.
-The real website-to-home transport, host authentication configuration, and Wi-Fi presence check still require integration and validation.
+The standalone demo does not establish the current production source contract or host configuration.
+
+## Hosted registration and PHP integration
+
+[Hosted registration install](HOSTED_REGISTRATION.md) describes the production guest routes, existing mail transport, and private People adapter.
+It defines same-origin controls, current home internet source checks, outbound agent requests, and scoped PHP-to-CGI installation.
+This adapter persists owner session tokens for per-request Python processes.
+It still requires the current website owner identity on every private request.
+The existing standalone WSGI factory above keeps its original in-process session contract.
+Host validation and an authorized acceptance demo remain required before deployment.
