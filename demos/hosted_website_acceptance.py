@@ -58,6 +58,9 @@ def check(condition: bool, label: str, detail: str = "") -> None:
 class FixtureServer(ThreadingMixIn, WSGIServer):
     daemon_threads = True
 
+    def enable_tls(self, context):
+        self.socket = context.wrap_socket(self.socket, server_side=True, do_handshake_on_connect=False)
+
     def handle_error(self, _request, _client_address):
         print(f"CHECK: fixture request error ({type(sys.exception()).__name__})", flush=True)
 
@@ -131,7 +134,7 @@ def run() -> None:
         owner_fixture = secrets.token_urlsafe(32)
         service_key = secrets.token_urlsafe(40)
         website_server = make_server(LOOPBACK, 0, lambda *_: [], server_class=FixtureServer, handler_class=QuietHandler)
-        website_server.socket = tls.wrap_socket(website_server.socket, server_side=True)
+        website_server.enable_tls(tls)
         website_origin = f"https://{LOOPBACK}:{website_server.server_port}"
         guest_socket = socket.socket()
         guest_socket.bind((LOOPBACK, 0))
