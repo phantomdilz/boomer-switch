@@ -28,7 +28,7 @@ def _protect_owned_options(parser: argparse.ArgumentParser, extra: list[str]) ->
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("tier", choices=("full", "smoke", "lights", "demo", "tooling"), nargs="?", default="full")
+    parser.add_argument("tier", choices=("full", "smoke", "lights", "demo", "registration", "tooling"), nargs="?", default="full")
     parser.add_argument("--workers", type=int, default=min(8, max(2, (getattr(os, "process_cpu_count", os.cpu_count)() or 2))))
     parser.add_argument("--durations", type=int)
     parser.add_argument("--slow-threshold", type=float, default=1)

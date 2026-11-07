@@ -53,6 +53,10 @@ button:hover:enabled { border-color: #29563f; box-shadow: inset 0 0 0 1px #29563
 button:focus-visible { outline: 3px solid #b37a22; outline-offset: 3px; }
 button:disabled { cursor: wait; opacity: .65; }
 footer { margin-top: 2rem; color: #526256; font-size: .8rem; line-height: 1.5; }
+form { display: grid; gap: .75rem; max-width: 30rem; }
+[hidden] { display: none !important; }
+input { min-height: 3.25rem; width: 100%; padding: .6rem; font: inherit; border: 1px solid #b9c9be; border-radius: .5rem; }
+label { font-weight: 650; }
 @media (min-width: 36rem) {
   main { padding-top: 3rem; }
   .light { padding: 1.35rem; }

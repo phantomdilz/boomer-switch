@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>House Lights access</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/registration.js" defer></script>
+</head>
+<body>
+<main>
+  <header class="page-header">
+    <span class="demo-label">Local demo · Sample lights</span>
+    <h1>House Lights</h1>
+    <p>Verify your email to request access.</p>
+  </header>
+  <p id="registration-status" role="status">Checking access…</p>
+  <form id="details" hidden>
+    <label for="name">Name</label>
+    <input id="name" name="name" autocomplete="name" maxlength="80" required>
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" autocomplete="email" maxlength="254" required>
+    <button id="send-code" type="submit">Send code</button>
+  </form>
+  <form id="verification" hidden>
+    <label for="code">Verification code</label>
+    <input id="code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required>
+    <button id="verify-code" type="submit">Verify code</button>
+    <button id="resend-code" type="button">Send new code</button>
+  </form>
+  <div id="controls" hidden>
+    <p id="connection" role="status">Checking lights…</p>
+    <div id="rooms" aria-label="Lights by room"></div>
+  </div>
+</main>
+</body>
+</html>
