@@ -1,0 +1,18 @@
+{
+  "lights": [
+    {
+      "light_id": "sample-lamp",
+      "name": "Sample lamp",
+      "room": "Sample room",
+      "device_id": "DEVICE_ID_PLACEHOLDER",
+      "outlet_id": null
+    },
+    {
+      "light_id": "sample-outlet",
+      "name": "Sample outlet lamp",
+      "room": "Sample room",
+      "device_id": "STRIP_ID_PLACEHOLDER",
+      "outlet_id": "OUTLET_ID_PLACEHOLDER"
+    }
+  ]
+}
