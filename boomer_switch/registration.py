@@ -22,6 +22,10 @@ class StalePerson(ValueError):
     """The owner action does not match the current person record."""
 
 
+class StaleInvitation(ValueError):
+    """The owner action refers to a replaced invitation."""
+
+
 def _digest(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
@@ -117,10 +121,26 @@ class RegistrationStore:
             words = self._setting(db, "alias")
             return {"token": self._setting(db, "invitation"), "alias": words.replace(" ", ""), "words": words}
 
-    def rotate(self):
+    def invitation_revision(self):
         with self._transaction() as db:
-            db.execute("UPDATE settings SET value=? WHERE key='invitation'", (secrets.token_urlsafe(32),))
-            db.execute("UPDATE settings SET value=? WHERE key='alias'", (self._alias(),))
+            return _digest(self._setting(db, "invitation"))
+
+    def rotate(self, expected=None, *, prepare=None):
+        current = self.invitation()
+        revision = _digest(current["token"])
+        if expected is not None and (not isinstance(expected, str) or not hmac.compare_digest(expected, revision)):
+            raise StaleInvitation("The invitation changed. Refresh before you replace it again.")
+        token, words = secrets.token_urlsafe(32), self._alias()
+        if _digest(token) == revision or words.replace(" ", "") == current["alias"]:
+            raise ValueError("Create a different invitation before replacement.")
+        if prepare is not None:
+            prepare({"token": token, "alias": words.replace(" ", ""), "words": words})
+        with self._transaction() as db:
+            if not hmac.compare_digest(revision, _digest(self._setting(db, "invitation"))):
+                raise StaleInvitation("The invitation changed. Refresh before you replace it again.")
+            db.execute("UPDATE settings SET value=? WHERE key='invitation'", (token,))
+            db.execute("UPDATE settings SET value=? WHERE key='alias'", (words,))
+            return _digest(self._setting(db, "invitation"))
 
     def resolve_alias(self, alias):
         with self._transaction() as db:
