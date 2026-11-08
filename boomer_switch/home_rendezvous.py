@@ -104,19 +104,27 @@ class HomeRendezvous:
         return peer
 
     def access(self, raw, environ):
+        return self.access_status(raw, environ) == "ready"
+
+    def access_status(self, raw, environ):
         try:
-            peer = self._guest_peer(raw,environ)
-            with self.store._transaction() as db:
-                self._observe_guest(db,raw,peer)
-                if not self._approved(db, _digest(raw)):
-                    return False
-                try:
-                    self._current(db, peer)
-                    return True
-                except (AccessDenied, HomeUnavailable):
-                    return False
+            peer = self._guest_peer(raw, environ)
         except AccessDenied:
-            return False
+            return "unavailable"
+        with self.store._transaction() as db:
+            if not self._approved(db, _digest(raw)):
+                return "unavailable"
+            current = db.execute('SELECT * FROM home_connection WHERE id=1').fetchone()
+            if current is None or not current['valid']:
+                return "unavailable"
+            age = self.store.clock() - current['seen']
+            # This observation explains access. It grants no device authority.
+            observation_limit = self.FRESH if current["active"] else self.idle + self.FRESH
+            if current['peer'] != peer and 0 <= age < observation_limit:
+                return "source_mismatch"
+            if current['peer'] == peer and current['active'] and 0 <= age < self.FRESH:
+                return "ready"
+            return "unavailable"
 
     def display(self, raw, environ):
         peer = self._guest_peer(raw,environ)

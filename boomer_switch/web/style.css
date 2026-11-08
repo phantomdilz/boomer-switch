@@ -30,14 +30,17 @@ h2 { margin: 0 0 .8rem; font-size: 1.1rem; }
   border-radius: 1rem;
   box-shadow: 0 2px 5px #26372f06;
 }
-.light-header { display: flex; gap: .75rem; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+.light-header { display: flex; flex-wrap: wrap; gap: .75rem; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
 h3 { margin: 0; font-size: 1.1rem; overflow-wrap: anywhere; }
 .state { flex-shrink: 0; padding: .35rem .65rem; border-radius: 1rem; font-size: .85rem; font-weight: 650; background: #eef0ed; }
 .state[data-state="on"] { color: #21512f; background: #e0f0dd; }
 .state[data-state="unavailable"] { color: #6d4219; background: #fff0d7; }
-.actions { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+.actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
 button {
   min-height: 3.5rem;
+  min-width: 0;
+  padding: .65rem .8rem;
+  overflow-wrap: anywhere;
   border-radius: .65rem;
   border: 1px solid #b9c9be;
   color: #26372f;
@@ -55,7 +58,7 @@ button:disabled { cursor: wait; opacity: .65; }
 footer { margin-top: 2rem; color: #526256; font-size: .8rem; line-height: 1.5; }
 form { display: grid; gap: .75rem; max-width: 30rem; }
 [hidden] { display: none !important; }
-input { min-height: 3.25rem; width: 100%; padding: .6rem; font: inherit; border: 1px solid #b9c9be; border-radius: .5rem; }
+input { min-height: 3.25rem; width: 100%; min-width: 0; max-width: 100%; padding: .6rem; font: inherit; border: 1px solid #b9c9be; border-radius: .5rem; }
 label { font-weight: 650; }
 .person-email { overflow-wrap: anywhere; }
 .person > button { width: 100%; margin-top: .75rem; }
@@ -68,4 +71,22 @@ label { font-weight: 650; }
 @media (prefers-reduced-motion: no-preference) {
   button { transition: background-color .15s, border-color .15s; }
 }
-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+fieldset { display: grid; gap: .75rem; border: 0; padding: 0; margin: 0; min-width: 0; }
+
+form, .light, .person { min-width: 0; }
+form p { margin: 0; }
+.person { margin-bottom: 1rem; }
+.person label input { display: block; margin-top: .5rem; }
+#refresh-light { width: 100%; margin-top: .75rem; }
+#connection[data-level="error"] {
+  color: #a11b1b;
+  background: #fff0f0;
+  border: 2px solid #a11b1b;
+  border-radius: .5rem;
+  padding: .75rem;
+  font-size: 1rem;
+  font-weight: 650;
+}
+@media (max-width: 24rem) {
+  .person .actions { grid-template-columns: 1fr; }
+}

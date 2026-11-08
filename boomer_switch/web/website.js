@@ -39,10 +39,15 @@ async function request(path, body) {
   if (result.csrf) csrf = result.csrf;
   return result;
 }
+function connectionMessage(text, error = false) {
+  connection.dataset.level = error ? "error" : "info";
+  connection.setAttribute("role", error ? "alert" : "status");
+  connection.textContent = text;
+}
 function unavailable(text) {
   stateLine.textContent = "Unavailable";
   on.disabled = true; off.disabled = true;
-  connection.textContent = text;
+  connectionMessage(text);
 }
 function clearControls(text) {
   operation = null;
@@ -53,6 +58,7 @@ function clearControls(text) {
   unavailable(text);
 }
 function show(result) {
+  const wasReady = homeReady;
   approved = result.status === "approved";
   homeReady = approved && result.home_ready === true;
   details.hidden = !["anonymous", "invited"].includes(result.status);
@@ -66,7 +72,16 @@ function show(result) {
   refreshButton.disabled = !homeReady || operation !== null;
   statusLine.textContent = {anonymous: "Open an invitation, or verify an approved email again.", invited: "Enter your name and email.", verify: "Enter the code from your email.", pending: "Waiting for approval", approved: "Access approved", denied: "Access unavailable. Contact the owner."}[result.status] || "Access unavailable.";
   if (result.status === "invalid_invitation") statusLine.textContent = "Invitation unavailable. Open a current invitation.";
-  if (!homeReady) clearControls("Use home internet and wait for its connection. This can take up to 60 seconds.");
+  if (!homeReady) {
+    const mismatch = approved && result.home_status === "source_mismatch";
+    const text = mismatch
+      ? "Error: This connection differs from the last reported home connection. Connect to the home Wi-Fi, then refresh this page."
+      : "The home connection is unavailable. Wait and refresh this page. This can take up to 60 seconds.";
+    clearControls(text);
+    connectionMessage(text, mismatch);
+  } else if (!wasReady) {
+    connectionMessage("Checking current state");
+  }
 }
 async function submit(path, body) {
   if (busy || !entry.canSubmit) return;
@@ -107,7 +122,7 @@ async function checkOperation() {
     if (result.status === "confirmed" && ["on", "off"].includes(result.state)) {
       operation = null;
       stateLine.textContent = result.state === "on" ? "On" : "Off";
-      connection.textContent = "Confirmed state from the home light";
+      connectionMessage("Confirmed state from the home light");
       on.disabled = false; off.disabled = false; refreshButton.disabled = false;
     } else if (["unknown", "denied", "not_started"].includes(result.status) || Date.now() >= current.until) {
       operation = null;
