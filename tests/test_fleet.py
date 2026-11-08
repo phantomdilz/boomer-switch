@@ -88,7 +88,7 @@ def test_all_fifteen_targets_read_and_command_only_the_selected_device(tmp_path)
     assert len(calls) == 30
 
 
-def test_foreign_missing_offsite_and_unread_targets_fail_closed(tmp_path):
+def test_foreign_missing_offsite_targets_fail_closed_and_direct_target_refreshes(tmp_path):
     home, rv, raw, devices, now, calls = fleet(tmp_path)
     async def scenario():
         await home.cycle()
@@ -100,12 +100,14 @@ def test_foreign_missing_offsite_and_unread_targets_fail_closed(tmp_path):
             rv.enqueue(raw, env(CELL), {"operation_id": str(uuid.uuid4()), "action": "read", "light_id": LIGHTS[0].light_id})
         read = enqueue(rv, raw, LIGHTS[0].light_id)
         await home.cycle()
-        with pytest.raises(HomeUnavailable):
-            enqueue(rv, raw, LIGHTS[1].light_id, "on")
         with pytest.raises(OperationConflict):
             enqueue(rv, raw, LIGHTS[1].light_id, operation=read["operation_id"])
+        command = enqueue(rv, raw, LIGHTS[1].light_id, "on")
+        await home.cycle()
+        assert rv.operation(raw, env(), command["operation_id"])["state"] == "on"
+        assert devices[1].updates == 3
     asyncio.run(scenario())
-    assert len(calls) == 1 and not any(device.commands for device in devices)
+    assert len(calls) == 2 and devices[0].commands == 0 and devices[1].commands == 1
 
 
 def test_unknown_a_is_not_cleared_by_read_b_and_does_not_block_b(tmp_path):
@@ -168,8 +170,9 @@ def test_unavailable_device_cannot_command_or_hide_other_device(tmp_path):
         await home.cycle()
         result = rv.operation(raw, env(), read["operation_id"])
         assert result["state"] == "unavailable" and result["availability"] == "unavailable"
-        with pytest.raises(HomeUnavailable):
-            enqueue(rv, raw, LIGHTS[0].light_id, "on")
+        denied = enqueue(rv, raw, LIGHTS[0].light_id, "on")
+        await home.cycle()
+        assert rv.operation(raw, env(), denied["operation_id"])["state"] == "unavailable"
         enqueue(rv, raw, LIGHTS[1].light_id)
         await home.cycle()
         command = enqueue(rv, raw, LIGHTS[1].light_id, "on")
@@ -177,6 +180,35 @@ def test_unavailable_device_cannot_command_or_hide_other_device(tmp_path):
         assert rv.operation(raw, env(), command["operation_id"])["state"] == "on"
     asyncio.run(scenario())
     assert devices[0].commands == 0 and devices[1].commands == 1
+
+
+def test_direct_command_without_cached_read_keeps_final_authority_and_readback(tmp_path):
+    home, rv, raw, devices, now, calls = fleet(tmp_path)
+    async def scenario():
+        await home.cycle()
+        operation = enqueue(rv, raw, LIGHTS[0].light_id, "on")
+        await home.cycle()
+        result = rv.operation(raw, env(), operation["operation_id"])
+        assert result["state"] == "on" and devices[0].commands == 1 and devices[0].updates == 3
+        assert len(calls) == 1 and not any(device.commands for device in devices[1:])
+    asyncio.run(scenario())
+
+
+def test_direct_command_revoked_during_refresh_cannot_actuate(tmp_path):
+    home, rv, raw, devices, now, calls = fleet(tmp_path)
+    def revoke():
+        if devices[0].updates == 2:
+            rv.store.operator("revoke", "guest@example.invalid")
+    devices[0].on_update = revoke
+    async def scenario():
+        await home.cycle()
+        operation = enqueue(rv, raw, LIGHTS[0].light_id, "on")
+        await home.cycle()
+        with rv.store._transaction() as db:
+            result = json.loads(db.execute("SELECT outcome FROM home_operations WHERE id=?", (operation["operation_id"],)).fetchone()[0])
+        assert result == {"status": "denied", "state": "unavailable"}
+    asyncio.run(scenario())
+    assert devices[0].updates == 2 and devices[0].commands == 0
 
 
 def test_assignment_target_cannot_change_during_authorization_or_receipt(tmp_path):

@@ -49,7 +49,9 @@ A confirmed read reconciles uncertain commands only for that physical lamp.
 An uncertain lamp A does not block lamp B after the accepted receipt reaches the website.
 One operation runs at a time. A transport failure retains the accepted result for receipt recovery before another assignment.
 No background device scan occurs. A guest's explicit refresh or command supplies the target ID.
-The website requires a recent confirmed result for that same light before an On or Off command.
+The website permits a direct On or Off request for a selected light without a separate cached read.
+The home runner refreshes that exact device before its final dispatch authorization and confirms state after the command.
+Its journal still blocks uncertain commands until a confirmed read of that physical light.
 
 The guest catalog contains only public IDs, names, and rooms. It appears only after approval and current source checks.
 Reachability comes from the requested device read. A failed or uncertain read is unavailable, not confirmed Off.
@@ -157,3 +159,32 @@ No deployment, provider call, router change, guest isolation change, or physical
 
 The pilot extra pins python-kasa 0.12.0 (GPL-3.0-or-later) and aiohttp 3.14.5 (Apache-2.0 AND MIT).
 Their source is not copied into this repository. The project source remains under its MIT license.
+
+
+## Synthetic command latency
+
+Run `python demos/command_latency.py --baseline d283d02 --repeats 3` for a local comparison.
+It exercises the real hosted queue, journal, authorization, and unchanged home runner with a simulated device and transport.
+Both versions use the same request latency, device latency, and poll phases.
+
+The idle case has ready controls but no prior confirmed device state. The warm case has a fresh confirmed read.
+This measures tap-to-simulated-actuation and confirmation. It does not measure browser rendering, WAN latency, or installed hardware.
+The JSON evidence includes each sample and request counts under `data/pj88-latency/measurement.json`.
+
+The approved, home-ready access response advertises `direct_commands: true`.
+The updated client then sends the requested command directly. Older servers without this capability keep the explicit read-then-command path.
+Unknown results still require an explicit Refresh state. No automatic retry or background device read forms part of this change.
+
+
+The three paired samples against `d283d02` produced these tap-to-simulated-actuation medians:
+
+| Ready-control state | Baseline | Revised |
+| --- | ---: | ---: |
+| No prior confirmed device state | 1641 ms | 635 ms |
+| Fresh confirmed state | 639 ms | 634 ms |
+
+Both cases used 50 ms simulated website calls, 50 ms device queries, and identical 1-second home and UI poll schedules.
+The no-prior-state case removed one queue cycle: two guest operations became one, and four authorizations became two.
+Device updates fell from five to three. The remaining three include the command's device refresh and confirmed readback.
+Warm-path ranges overlap, so these samples do not establish a warm-path improvement.
+This change does not reduce the 15-second idle heartbeat wait before controls become ready.
