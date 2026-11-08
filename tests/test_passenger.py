@@ -38,6 +38,7 @@ def hosted(tmp_path, monkeypatch):
     monkeypatch.setattr('boomer_switch.website_cgi.SendmailTransport', Transport)
     config = json.loads(Path('hosting/passenger-config.example.json').read_text())
     config['state_directory'] = str(tmp_path / 'state')
+    config['service_key'] = 'k'*40
     config['passenger']['owner_validator_command'] = [sys.executable]
     path = tmp_path / 'config.local.passenger.json'
     path.write_text(json.dumps(config))
@@ -207,6 +208,23 @@ def test_invalid_private_config_before_send_is_definitely_unsent(hosted):
     assert not app.app.mail.transport.transport.messages
     app.config_path.write_text(saved)
     assert app.app.mail.deliver() == 1
+
+
+def test_paused_unsent_owner_notice_is_delivered_once_after_resume(hosted):
+    app = enabled(hosted)
+    store = app.app.store
+    raw = store.browser(store.invitation()['token'])
+    store.start(raw, 'Guest', 'guest@example.invalid')
+    store.verify(raw, store.mailbox('guest@example.invalid')['messages'][-1]['code'])
+    hosted[1](mail_enabled=False)
+    from boomer_switch.website_mail import MailUnavailable
+    with pytest.raises(MailUnavailable, match='paused'):
+        app.app.mail.deliver()
+    assert not app.app.mail.transport.transport.messages
+    hosted[1](mail_enabled=True)
+    assert app.app.mail.deliver() == 1
+    assert str(app.app.mail.transport.transport.messages[0]['To']) == 'owner@example.invalid'
+    assert app.app.mail.deliver() == 0
 
 
 @pytest.mark.parametrize('script,expected', [
