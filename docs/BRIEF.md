@@ -6,6 +6,9 @@ Guests must use the home's current internet egress and a verified, approved webs
 They can use a bookmark on return visits without a vendor app, VPN client, shared credentials, or a physical switch.
 
 The guest page groups lights by room with names a visitor recognizes. Each light has large On and Off controls. The page shows the state reported by the device and displays **Unavailable** when it cannot confirm that state.
+While an approved guest uses the home connection and keeps the page visible, states update automatically through one shared read queue.
+The last confirmed On or Off stays visible with its age. Reports older than 45 seconds are marked stale.
+A full serial pass can take a minute or more across 15 lights. A tap or explicit refresh takes priority over an unleased automatic read.
 
 ## Guest registration and access
 1. The guest scans a QR code on a printed card or types the short URL printed beneath it. The QR holds the full invitation URL; the short link comes from a self-hosted URL shortener (e.g., YOURLS) and opens the same invitation.

@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
+import time
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +32,26 @@ class Fixture:
         self.operations = {}
         self.posts = []
         self.hold = False
+        self.freeze_auto = False
+        self.age_offset = 0
+        self.reports = {}
+        self.confirmed = {}
+        self.attempts = {}
+        self.auto_reads = []
+        self.phase = 0
+
+    def now(self):
+        return time.monotonic()+self.age_offset
+
+    def sample(self,target):
+        state = self.states[target]
+        availability = 'online'
+        if target in self.offline:
+            state,availability='unavailable','unavailable'
+        elif target in self.unknown:
+            state,availability='unavailable','unknown'
+        self.reports[target]={'state':state,'availability':availability,'at':self.now()}
+        if availability=='online':self.confirmed[target]=self.reports[target]
 
     def access(self):
         result = {'status':self.status,'csrf':'synthetic-csrf'}
@@ -39,7 +60,15 @@ class Fixture:
             if self.home == 'ready':
                 if not self.legacy: result['direct_commands'] = True
                 if self.legacy: result['light'] = CATALOG[0]
-                else: result['lights'] = CATALOG
+                else:
+                    result.update(lights=CATALOG,automatic_updates=True,state_generation=1,state_time=self.now())
+                    result['states']=[]
+                    for light in CATALOG:
+                        report=self.reports.get(light['light_id']);good=self.confirmed.get(light['light_id']);age=None if report is None else max(0,round((self.now()-report['at'])*1000))
+                        result['states'].append({'light_id':light['light_id'],'state':report['state'] if report else 'unavailable',
+                            'availability':'stale' if report and report['availability']=='online' and age>=45000 else report['availability'] if report else 'unchecked',
+                            'age_ms':age,'sample':report['at'] if report else None,
+                            'last_confirmed':{'state':good['state'],'age_ms':max(0,round((self.now()-good['at'])*1000))} if good else None})
         return result
 
     def route(self, route):
@@ -59,6 +88,16 @@ class Fixture:
         if name == 'verify': self.status='pending'; route.fulfill(json=self.access()); return
         if name == 'lights' and request.method == 'POST':
             body = request.post_data_json
+            if body.get('background') is True:
+                if self.status!='approved' or self.home!='ready' or set(body)!={'operation_id','action','background','preferred'} or body['action']!='read':
+                    route.fulfill(status=403,json={'error':'Access unavailable.'});return
+                self.posts.append(dict(body))
+                if not self.freeze_auto and not any(not op.get('_finished') for op in self.operations.values()) and (not self.auto_reads or self.now()-self.auto_reads[-1]['at']>=2):
+                    eligible=sorted((light['light_id'] for light in CATALOG if self.now()-self.attempts.get(light['light_id'],float('-inf'))>=10),key=lambda target:(self.attempts.get(target,float('-inf')),target))
+                    preferred=[target for target in eligible if target in body['preferred']] if self.phase!=2 else []
+                    if eligible:
+                        target=(preferred or eligible)[0];self.sample(target);self.attempts[target]=self.now();self.auto_reads.append({'target':target,'at':self.now()});self.phase=(self.phase+1)%3
+                route.fulfill(status=202,json=self.access());return
             expected = {'operation_id','action'} if self.legacy else {'operation_id','action','light_id'}
             target = body.get('light_id','desk' if self.legacy else None)
             if set(body)!=expected or target not in self.states or body.get('action') not in ('read','on','off'):
@@ -66,6 +105,7 @@ class Fixture:
             if self.status!='approved' or self.home!='ready':
                 route.fulfill(status=403,json={'error':'Access unavailable.'}); return
             self.posts.append(dict(body))
+            self.attempts[target]=self.now()
             self.operations[body['operation_id']] = body|{'target':target}
             route.fulfill(status=202,json={'operation_id':body['operation_id'],'status':'queued'}); return
         if '/api/operations/' in parsed.path:
@@ -83,6 +123,8 @@ class Fixture:
             else:
                 if operation['action']!='read': self.states[target]=operation['action']
                 result = {'status':'confirmed','state':self.states[target],'availability':'online','light_id':target}
+            if result['status']!='queued':
+                operation['_finished']=True;self.sample(target)
             result['operation_id'] = operation['operation_id']
             if self.legacy: result.pop('light_id',None);result.pop('availability',None)
             route.fulfill(json=result); return
@@ -113,35 +155,46 @@ def run(output):
                 picker.select_option(label='Sample study')
                 expect(page.get_by_role('heading', name='Sample study')).to_be_focused()
                 desk=page.locator('[data-light-id="desk"]');hall=page.locator('[data-light-id="hall"]');window=page.locator('[data-light-id="window"]')
-                expect(desk.locator('[data-role="state"]')).to_have_text('Not checked')
-                page.wait_for_timeout(3500)
-                assert fixture.posts==[], 'Approved access must not fan out device reads.'
+                expect(desk.locator('[data-role="state"]')).to_have_text('Off',timeout=15000)
+                expect(hall.locator('[data-role="state"]')).to_have_text('Off',timeout=15000)
+                expect(window.locator('[data-role="state"]')).to_have_text('Unavailable',timeout=15000)
+                expect(page.get_by_role('heading',name='Sample study')).to_be_focused()
+                assert fixture.auto_reads and all(after['at']-before['at']>=2 for before,after in zip(fixture.auto_reads,fixture.auto_reads[1:]))
+                foreground=lambda:[p for p in fixture.posts if not p.get('background')]
                 desk.locator('[data-action="on"]').click()
                 expect(desk.locator('[data-role="state"]')).to_have_text('On',timeout=10000)
-                assert [(p['action'],p['light_id']) for p in fixture.posts]==[('on','desk')]
-                hall.locator('[data-action="read"]').click()
-                expect(hall.locator('[data-role="state"]')).to_have_text('Off',timeout=10000)
-                window.locator('[data-action="read"]').click()
-                expect(window.locator('[data-role="state"]')).to_have_text('Unavailable',timeout=10000)
+                assert [(p['action'],p['light_id']) for p in foreground()]==[('on','desk')]
                 expect(window.locator('[data-action="on"]')).to_be_disabled()
                 assert hall.get_attribute('data-availability')!='unavailable', 'One failed device must not mark its neighbor unavailable.'
-                before=len(fixture.posts);page.wait_for_timeout(3500);assert len(fixture.posts)==before
-                fixture.states['hall']='on';hall.locator('[data-action="read"]').click()
-                expect(hall.locator('[data-role="state"]')).to_have_text('On',timeout=10000)
+                fixture.states['hall']='on'
+                expect(hall.locator('[data-role="state"]')).to_have_text('On',timeout=15000)
                 fixture.unknown.add('hall');hall.locator('[data-action="read"]').click()
                 expect(hall.locator('[data-role="state"]')).to_have_text('Unknown',timeout=10000)
                 expect(hall.locator('[data-action="off"]')).to_be_disabled()
+                fixture.unknown.clear();hall.locator('[data-action="read"]').click()
+                expect(hall.locator('[data-role="state"]')).to_have_text('On',timeout=10000)
+                fixture.freeze_auto=True;fixture.age_offset=50
+                expect(desk.locator('[data-role="state"]')).to_have_attribute('data-state','stale',timeout=10000)
+                expect(desk.locator('[data-role="state"]')).to_have_text('On')
+                expect(desk.locator('[data-role="detail"]')).to_contain_text('Stale')
+                desk.locator('[data-action="read"]').click()
+                expect(desk.locator('[data-role="state"]')).to_have_attribute('data-state','on',timeout=10000)
                 geometry(page);page.screenshot(path=str(output/f'multi-{width}.png'),full_page=True)
                 page.evaluate("document.documentElement.style.fontSize='200%'")
                 geometry(page);page.screenshot(path=str(output/f'multi-large-text-{width}.png'),full_page=True)
+                page.evaluate("Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});document.dispatchEvent(new Event('visibilitychange'))")
+                expect(page.locator('#controls')).to_be_hidden();page.wait_for_timeout(300)
+                before=len(fixture.auto_reads);page.wait_for_timeout(2500);assert len(fixture.auto_reads)==before
+                page.evaluate("Object.defineProperty(document,'hidden',{configurable:true,get:()=>false});document.dispatchEvent(new Event('visibilitychange'))")
+                expect(page.locator('#controls')).to_be_visible(timeout=10000)
                 # The pending UI request is cleared when source access disappears.
                 fixture.hold=True;desk.locator('[data-action="on"]').click()
                 expect(desk.locator('[data-role="state"]')).to_have_text('Checking')
-                before=len(fixture.posts);fixture.home='source_mismatch'
+                before=len(foreground());fixture.home='source_mismatch'
                 expect(page.locator('#controls')).to_be_hidden(timeout=10000)
                 expect(page.locator('#connection')).to_have_attribute('role','alert')
                 expect(page.locator('#rooms')).to_have_text('')
-                fixture.hold=False;page.wait_for_timeout(1500);assert len(fixture.posts)==before
+                fixture.hold=False;page.wait_for_timeout(1500);assert len(foreground())==before
                 fixture.status='denied'
                 expect(page.locator('#status')).to_contain_text('Access unavailable',timeout=10000)
                 expect(page.locator('#controls')).to_be_hidden()
@@ -154,12 +207,13 @@ def run(output):
                 assert all('light_id' not in p for p in fixture.posts[before:])
                 geometry(page);assert not errors, errors
                 checks.append({'width':width,'grouped_lights':3,'independent_failure':True,'explicit_targeting':True,
-                               'no_background_device_reads':True,'legacy_singleton':True,'large_text':True})
+                               'automatic_external_updates':True,'global_read_cap':True,'last_state_age_and_stale':True,
+                               'hidden_stop':True,'room_focus_preserved':True,'legacy_singleton':True,'large_text':True})
                 context.close()
         finally: browser.close()
     print(json.dumps({'ok':True,'checks':checks}))
 
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser();parser.add_argument('--output',type=Path,default=ROOT/'.test-runs/pj84-multi-light')
+    parser=argparse.ArgumentParser();parser.add_argument('--output',type=Path,default=ROOT/'.test-runs/pj89-state-updates')
     args=parser.parse_args();run(args.output)

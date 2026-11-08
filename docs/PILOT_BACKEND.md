@@ -48,7 +48,32 @@ Keep the stopped journal's backup for recovery and reconcile unresolved operatio
 A confirmed read reconciles uncertain commands only for that physical lamp.
 An uncertain lamp A does not block lamp B after the accepted receipt reaches the website.
 One operation runs at a time. A transport failure retains the accepted result for receipt recovery before another assignment.
-No background device scan occurs. A guest's explicit refresh or command supplies the target ID.
+Approved, on-home, visible pages request automatic state updates through the existing `POST /api/lights` route.
+The server admits at most one automatic read every two seconds across all guests, and at most one read per target every ten seconds.
+It coalesces concurrent callers instead of adding a scan per phone. Every third admission serves the oldest target across the complete catalog; other admissions can prefer visible lights.
+Each read still needs the current verified session, permission, fresh home source, target binding, and normal machine authorization.
+These reports never authorize a command. The home runner and its final dispatch guard are unchanged.
+A foreground tap or explicit refresh cancels only an unleased automatic read. It can wait behind one leased read, not a complete scan.
+The original eight-second operation expiry still applies. A stalled read can make a waiting tap expire; the application never extends or replays that tap.
+
+Each visible guest sends at most 30 automatic requests per minute while healthy; those requests replace ordinary access polling.
+Failures back off up to 30 seconds. Hidden pages and lost access stop new automatic requests; an already accepted read can finish.
+The device budget is 30 automatic **read operations** per minute globally. The unchanged runner can make two device update calls per read operation.
+State reports come from the canonical operation receipts. Indexed queries retain the newest command truth as well as read truth.
+At most two old read rows per current light remain for its latest attempt and confirmation. Old session/source fields are cleared, and superseded read rows are pruned.
+An uncertain local dispatch cannot be cleared by an older cached report, including when the enqueue acknowledgement was lost.
+It needs a newer confirmed observation or an explicit confirmed refresh. Source and permission failures still clear private labels and controls.
+
+The UI keeps the last confirmed On or Off with its age and marks reports older than 45 seconds stale.
+An unavailable or unknown result remains distinct from a stale report and never becomes a confirmed Off.
+The bounded synthetic probe is `python demos/automatic_updates_probe.py`; it makes no network or device calls.
+Its two-guest, 15-light virtual sweep observed all targets in 62 seconds, with 44 read operations and 88 device update calls over 90 simulated seconds.
+Under simulated 50 ms HTTP/device calls, wall-clock tap-to-actuation was about 0.64 seconds with no read or an unleased read, and 1.16 seconds behind a read held for 250 ms.
+These are fixture measurements, not household latency guarantees. A slow or unreachable device can increase a full pass; visible room hints do not starve the remaining catalog.
+`demos/multi_light_acceptance.py` now checks automatic changes, stale age labels, hidden stop, room focus, priority controls, and the older explicit-read fallback.
+This replaces its former no-background-read criterion; domain tests retain the global cap, two-guest fairness, target isolation, expiry, and authorization distinctions.
+
+A guest's explicit refresh or command still supplies the exact target ID.
 The website permits a direct On or Off request for a selected light without a separate cached read.
 The home runner refreshes that exact device before its final dispatch authorization and confirms state after the command.
 Its journal still blocks uncertain commands until a confirmed read of that physical light.
@@ -173,7 +198,8 @@ The JSON evidence includes each sample and request counts under `data/pj88-laten
 
 The approved, home-ready access response advertises `direct_commands: true`.
 The updated client then sends the requested command directly. Older servers without this capability keep the explicit read-then-command path.
-Unknown results still require an explicit Refresh state. No automatic retry or background device read forms part of this change.
+The PJ88 comparison did not include automatic reads. The current client keeps an unknown result blocked until an explicit confirmed refresh or a newer confirmed automatic observation.
+It never retries an uncertain command. The automatic-update measurements above include read contention separately.
 
 
 The three paired samples against `d283d02` produced these tap-to-simulated-actuation medians:

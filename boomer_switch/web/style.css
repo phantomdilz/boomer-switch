@@ -130,3 +130,4 @@ section.room {
 .room > .light + .light { border-top: 1px solid #9ba99d; }
 .light-detail { line-height: 1.45; overflow-wrap: anywhere; }
 .state[data-state="unknown"] { color: #6d4219; background: #fff0d7; }
+.state[data-state="stale"] { color: #6d4219; background: #fff0d7; }
