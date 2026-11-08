@@ -15,7 +15,7 @@ The [Passenger installation contract](docs/HOSTED_REGISTRATION.md#passenger-and-
 ## Architecture
 - **Guest web app** — House Lights page and registration flow.
 - **Home service** — always-on home server running [python-kasa](https://github.com/python-kasa/python-kasa) on the main network. It keeps device credentials and the allowlist private and polls the hosted website over authenticated outbound HTTPS. It opens no guest or public listener.
-- **Owner admin** — private People page on the owner's website, behind the owner's sign-in. The website manages permissions and sends verification codes and owner notices through its existing mail system.
+- **Owner admin** — private People page on the owner's website, behind the owner's sign-in. The website manages permissions and sends guest verification codes through its existing mail system. Verified pending requests use the [private owner bot](docs/OWNER_NOTIFICATIONS.md), with signed Approve/Deny buttons and a People link.
 - **Command checks** — the website requires verified identity, current owner permission, and matching server-observed public IPv4 egress for the guest and home. The home runner rechecks permission, source generation, and expiry immediately before dispatch. Unknown checks fail closed. The website refreshes the home's observed ISP address automatically. Public egress matching does not prove physical Wi-Fi presence.
 
 See [docs/BRIEF.md](docs/BRIEF.md) for the full brief and [AGENTS.md](AGENTS.md) for contribution rules.

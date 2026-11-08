@@ -10,6 +10,7 @@ from .registration import RegistrationStore
 from .home_rendezvous import HomeRendezvous
 from .website import WebsiteApplication
 from .website_mail import WebsiteMail, SMTPTransport, SendmailTransport
+from .owner_notifications import OwnerNotifications
 
 
 def create_application(config):
@@ -24,10 +25,16 @@ def create_application(config):
         transport = SendmailTransport(mail_config["executable"])
     else:
         raise ValueError("Configure the website mail transport.")
-    mail = WebsiteMail(store, transport, mail_config["sender"], mail_config["owner"])
+    owner = config.get('owner_notifications')
+    notices = None
+    if owner is not None:
+        if not isinstance(owner, dict) or set(owner) != {'command', 'decision_key'} or owner['decision_key'] == config['service_key']:
+            raise ValueError("Configure a separate private owner-action capability.")
+        notices = OwnerNotifications(store, owner['command'], owner['decision_key'], config['origin']+config['mount']+'/people')
+    mail = WebsiteMail(store, transport, mail_config["sender"], owner_notifications=notices)
     rendezvous = HomeRendezvous(store, config["service_key"], idle_poll_seconds=config.get("idle_poll_seconds", 15))
     return WebsiteApplication(store, mail, origin=config["origin"], mount=config["mount"],
-                              owner_identity=config["owner_identity"], grant_app=None, rendezvous=rendezvous)
+                              owner_identity=config["owner_identity"], grant_app=None, rendezvous=rendezvous, owner_actions=notices)
 
 
 def main():

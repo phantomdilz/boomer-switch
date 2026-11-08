@@ -90,6 +90,7 @@ Apply each path relative to the configured mount, with an end anchor; do not exe
 | POST | `/api/lights` | Public | Origin, CSRF, current approval, fresh matching source, and pilot switch |
 | GET | `/api/operations/<uuid>` | Public | Current guest approval, matching source, and operation ownership |
 | POST | `/home/poll`, `/home/authorize`, `/home/result` | Public | Private machine Bearer key and canonical source/operation policy |
+| POST | `/owner/decision` | Public | Separate bot capability, signed pending revision, and People write switch |
 | GET | `/people`, `/people.js`, `/api/people` | Existing owner login required | Current private owner validator and bound owner session |
 | POST | `/api/people` | Existing owner login required | Current validator after body, owner CSRF, revision, and People write switch |
 
@@ -175,13 +176,15 @@ Do not expose the bare production factory without equivalent trusted hosting and
 
 ## Mail
 
-For SMTP, `mail` holds `transport: smtp`, `host`, numeric `port`, `sender`, and `owner`.
+For SMTP, `mail` holds `transport: smtp`, `host`, numeric `port`, `sender`.
 It can also hold `username`, `password`, and Boolean `implicit_tls`.
 SMTP always uses certificate-verified TLS. Its socket operations have a 5-second timeout each.
 The hosting request limit provides the outer deadline.
 
-For the existing local mail facility, use `transport: sendmail`, an absolute `executable`, `sender`, and `owner`.
+For the existing local mail facility, use `transport: sendmail`, an absolute `executable`, `sender`.
 Do not provision a new provider.
+
+Guest verification stays on email. Owner requests use [the private bot integration](OWNER_NOTIFICATIONS.md), with People as the manual fallback. Production does not email the owner.
 
 Registration retains its per-email and global send limits.
 Each mail row has one durable claim and stable Message-ID.
