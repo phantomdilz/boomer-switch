@@ -262,3 +262,18 @@ def test_hosting_package_inputs_are_complete():
     inputs = config['tool']['setuptools']['data-files']['share/boomer-switch/hosting']
     assert {'hosting/passenger_wsgi.py', 'hosting/passenger-config.example.json', 'hosting/index.php'} <= set(inputs)
     assert all(Path(item).is_file() for item in inputs)
+
+
+def test_fleet_catalog_has_bounded_poll_only_admission(hosted):
+    from boomer_switch.configuration import POLL_BYTES
+    app = enabled(hosted)
+    lights = [{"light_id": f"sample-{i}", "name": "\U0001f4a1" * 120, "room": "\U0001f4a1" * 120} for i in range(32)]
+    body = {"agent_id": str(uuid.uuid4()), "sequence": 1, "request_id": str(uuid.uuid4()),
+            "lights": lights, "catalog_revision": "c" * 64}
+    assert 4096 < len(json.dumps(body)) < POLL_BYTES
+    status, _, result = invoke(app, "/home/poll", body, HTTP_AUTHORIZATION="Bearer " + "k" * 40)
+    assert status == 200 and result["operation"] is None
+    status, _, _ = invoke(app, "/api/register", body)
+    assert status == 413
+    status, _, _ = invoke(app, "/home/poll", body, CONTENT_LENGTH=str(POLL_BYTES + 1))
+    assert status == 413

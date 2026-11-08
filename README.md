@@ -148,7 +148,7 @@ The full acceptance script requires an explicit private template path and decode
 
 ## Real guest acceptance blockers
 
-The [outbound one-lamp home connection](docs/PILOT_BACKEND.md) uses the public website and needs no guest-side computer or inbound home route.
+The [outbound selected-light home connection](docs/PILOT_BACKEND.md) uses the public website and needs no guest-side computer or inbound home route.
 Run `python -m boomer_switch.home_runner --config config.local.home.json` with a private copy of `home.example.json`.
 The old Windows proxy, local TLS server, handoff, and reachability setup are superseded.
 
