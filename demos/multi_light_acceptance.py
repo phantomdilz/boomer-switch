@@ -37,6 +37,7 @@ class Fixture:
         if self.status == 'approved':
             result.update(home_status=self.home,home_ready=self.home=='ready')
             if self.home == 'ready':
+                if not self.legacy: result['direct_commands'] = True
                 if self.legacy: result['light'] = CATALOG[0]
                 else: result['lights'] = CATALOG
         return result
@@ -117,7 +118,7 @@ def run(output):
                 assert fixture.posts==[], 'Approved access must not fan out device reads.'
                 desk.locator('[data-action="on"]').click()
                 expect(desk.locator('[data-role="state"]')).to_have_text('On',timeout=10000)
-                assert [(p['action'],p['light_id']) for p in fixture.posts]==[('read','desk'),('on','desk')]
+                assert [(p['action'],p['light_id']) for p in fixture.posts]==[('on','desk')]
                 hall.locator('[data-action="read"]').click()
                 expect(hall.locator('[data-role="state"]')).to_have_text('Off',timeout=10000)
                 window.locator('[data-action="read"]').click()
@@ -133,7 +134,7 @@ def run(output):
                 geometry(page);page.screenshot(path=str(output/f'multi-{width}.png'),full_page=True)
                 page.evaluate("document.documentElement.style.fontSize='200%'")
                 geometry(page);page.screenshot(path=str(output/f'multi-large-text-{width}.png'),full_page=True)
-                # A stale-read follow-up is cancelled when source access disappears.
+                # The pending UI request is cleared when source access disappears.
                 fixture.hold=True;desk.locator('[data-action="on"]').click()
                 expect(desk.locator('[data-role="state"]')).to_have_text('Checking')
                 before=len(fixture.posts);fixture.home='source_mismatch'
