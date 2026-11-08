@@ -8,7 +8,8 @@ import json
 import secrets
 from urllib.parse import urlencode, urlsplit
 
-from .people import OwnerPrincipal, PeopleApplication, owner_cookie
+from .people import OwnerPrincipal, PeopleApplication, owner_cookie, INVITATION_PATHS
+from .owner_invitation import OwnerInvitationCards
 from .registration import AccessDenied, InvalidInvitation, StalePerson, _digest
 from .website_mail import MailUnavailable
 from .home_rendezvous import HomeUnavailable, OperationConflict
@@ -17,14 +18,14 @@ from .website_grants import json_object
 from .owner_notifications import OWNER_DECISION_PATH
 
 
-OWNER_PATHS = ("/people", "/people.js", "/api/people")
+OWNER_PATHS = ("/people", "/people.js", "/api/people") + INVITATION_PATHS
 REGISTRATION_MAIL_PATHS = ("/api/register", "/api/resend", "/api/verify")
 
 
 class WebsiteApplication:
     """Keep public registration separate from current server-authenticated People."""
 
-    def __init__(self, store, mail, *, origin, mount, owner_identity, grant_app=None, handoff=None, rendezvous=None, owner_actions=None):
+    def __init__(self, store, mail, *, origin, mount, owner_identity, grant_app=None, handoff=None, rendezvous=None, owner_actions=None, invitation_template=None):
         parsed = urlsplit(origin)
         if parsed.scheme != "https" or not parsed.netloc or parsed.path or parsed.query or parsed.fragment or parsed.username:
             raise ValueError("Configure the HTTPS website origin.")
@@ -36,7 +37,7 @@ class WebsiteApplication:
         self.owner_identity, self.grant_app, self.handoff = owner_identity, grant_app, handoff
         self.rendezvous = rendezvous
         self.owner_actions = owner_actions
-        self.people = PeopleApplication(store)
+        self.people = PeopleApplication(store, invitation_cards=OwnerInvitationCards(store, origin + mount, invitation_template))
         with store._transaction() as db:
             db.execute("CREATE TABLE IF NOT EXISTS website_owners (id TEXT PRIMARY KEY, csrf TEXT NOT NULL, expires REAL NOT NULL)")
 

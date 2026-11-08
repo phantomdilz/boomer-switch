@@ -74,7 +74,7 @@ The adapter revalidates the owner at dispatch after reading the body; People ret
 
 Keep the existing website login and access rules outside this namespace unchanged.
 Route the component's public guest page, `entry.js`, `website.js`, `style.css`, invitation links, registration APIs, and authenticated `/home/*` APIs to this application.
-Keep `/people`, `/people.js`, and `/api/people` behind its private validator.
+Keep `/people`, `/people.js`, `/api/people`, `/api/invitation`, `/invitation-card`, and `/invitation.pdf` behind its private validator.
 Do not retain the read-only stage's GET-only route allowlist when promoting registration.
 Publish the app, page, scripts, and scoped Apache asset rule together as one new release.
 Do not modify a staged immutable release in place.
@@ -92,8 +92,15 @@ Apply each path relative to the configured mount, with an end anchor; do not exe
 | GET | `/api/operations/<uuid>` | Public | Current guest approval, matching source, and operation ownership |
 | POST | `/home/poll`, `/home/authorize`, `/home/result` | Public | Private machine Bearer key and canonical source/operation policy |
 | POST | `/owner/decision` | Public | Separate bot capability, signed pending revision, and People write switch |
-| GET | `/people`, `/people.js`, `/api/people` | Existing owner login required | Current private owner validator and bound owner session |
-| POST | `/api/people` | Existing owner login required | Current validator after body, owner CSRF, revision, and People write switch |
+| GET | `/people`, `/people.js`, `/api/people`, `/api/invitation`, `/invitation-card`, `/invitation.pdf` | Existing owner login required | Current private owner validator and bound owner session |
+| POST | `/api/people`, `/api/invitation` | Existing owner login required | Current validator after body, owner CSRF, revision, and People write switch |
+
+The invitation routes need no public login exception. Keep them behind the same owner login as People.
+Set `invitation_template` to the absolute private path of the retained blank two-page master and install the `pdf` extra.
+Grant the application worker read access. Keep the master outside the document root and the public repository.
+Publish the updated People page, script, and application together, then restart Passenger after the configuration change.
+Reuse the canonical state directory. Deployment and card downloads do not replace the issued invitation.
+Only the confirmed, versioned owner POST replaces it. Both PDF designs retain the current QR and typed address.
 
 Limit alias, token, and UUID suffixes to one path segment. Other methods and paths get no login exception.
 Do not add exceptions for demo mailbox, operator, exchange, or retired grant routes.

@@ -16,7 +16,9 @@ A full serial pass can take a minute or more across 15 lights. A tap or explicit
 3. The owner approves or denies. After approval the waiting page opens the controls automatically. The bookmarkable URL contains no invitation secret.
 4. Access lasts until removed by default; the owner can set an optional end date. An approved guest on a new phone can re-verify the same email without another approval.
 
-The QR is generated locally. The short-link keyword is random and easy to type. If the card leaks, the owner retires the invitation and its short link; existing approvals and bookmarks keep working.
+People lets the owner print the current QR and typed address or replace the invitation after confirmation.
+The private two-page template supplies both print designs. The short-link keyword is random and easy to type.
+Replacement retires the old QR and short link. Existing approvals and bookmarks keep working.
 
 ## Owner administration
 A private People page on the owner's website, behind the owner's sign-in:

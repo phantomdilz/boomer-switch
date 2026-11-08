@@ -277,3 +277,125 @@ def test_fleet_catalog_has_bounded_poll_only_admission(hosted):
     assert status == 413
     status, _, _ = invoke(app, "/home/poll", body, CONTENT_LENGTH=str(POLL_BYTES + 1))
     assert status == 413
+
+
+def test_owner_replaces_invitation_once_and_prints_both_designs(hosted, tmp_path):
+    from pypdf import PdfWriter, PdfReader
+    from boomer_switch.registration import AccessDenied
+
+    app = enabled(hosted)
+    guest, guest_csrf = verified(app)
+    store = app.app.store
+    _, headers, people = invoke(app, '/api/people', cookie='EXISTING_OWNER_COOKIE=synthetic')
+    owner = 'EXISTING_OWNER_COOKIE=synthetic; ' + headers['Set-Cookie'].split(';')[0]
+    person = people['people'][0]
+    assert invoke(app, '/api/people', {'action': 'approve', 'email': person['email'], 'revision': person['revision']}, owner, people['csrf'])[0] == 200
+    old = store.invitation()
+    unverified = store.browser(old['token'])
+    store.start(unverified, 'Another sample', 'another@example.invalid')
+    saved_people = store.people()
+    messages = len(app.app.mail.transport.transport.messages)
+    template = tmp_path / 'blank.pdf'
+    writer = PdfWriter()
+    for _ in range(2):
+        writer.add_blank_page(612, 792)
+    writer.write(template)
+    original = template.read_bytes()
+    app.app.people.invitation_cards.template = template
+    status, headers, invitation = invoke(app, '/api/invitation', cookie=owner)
+    assert status == 200 and headers['Cache-Control'] == 'no-store'
+    assert invitation['pdf_available'] is True
+    body = {'revision': invitation['revision'], 'confirmation': 'replace'}
+    for invalid in ({'revision': None, 'confirmation': 'replace'}, {'confirmation': 'replace'},
+                    {'revision': invitation['revision'], 'confirmation': 'yes'}):
+        assert invoke(app, '/api/invitation', invalid, owner, invitation['csrf'])[0] == 400
+    assert invoke(app, '/api/invitation', body, owner, 'wrong')[0] == 403
+    assert invoke(app, '/api/invitation', body, owner, invitation['csrf'], HTTP_ORIGIN='https://other.invalid')[0] == 403
+    assert store.invitation() == old
+    status, _, current = invoke(app, '/api/invitation', body, owner, invitation['csrf'])
+    assert status == 200 and current['revision'] != invitation['revision']
+    new = store.invitation()
+    assert invoke(app, '/api/invitation', body, owner, invitation['csrf'])[0] == 409
+    assert store.invitation() == new
+    status, redirect, _ = invoke(app, '/s/' + old['alias'])
+    assert status == 303 and redirect['Location'].endswith('/guest#invitation=')
+    assert invoke(app, '/api/invite', {'invitation': old['token']}, guest, guest_csrf)[0] == 403
+    status, redirect, _ = invoke(app, '/s/' + new['alias'])
+    assert status == 303 and redirect['Location'].endswith('/guest#invitation=' + new['token'])
+    with pytest.raises(AccessDenied):
+        store.resolve_alias(old['alias'])
+    with pytest.raises(AccessDenied):
+        store.start(unverified, 'Another sample', 'another@example.invalid')
+    assert invoke(app, '/api/access', cookie=guest)[2]['status'] == 'approved'
+    assert store.people() == saved_people
+    assert len(app.app.mail.transport.transport.messages) == messages
+    status, _, card = invoke(app, '/invitation-card', cookie=owner)
+    assert status == 200 and b'<svg' in card and new['alias'].encode() in card
+    assert old['alias'].encode() not in card
+    status, headers, pdf = invoke(app, '/invitation.pdf', cookie=owner)
+    assert status == 200 and headers['Content-Type'] == 'application/pdf' and headers['Cache-Control'] == 'no-store'
+    reader = PdfReader(BytesIO(pdf))
+    assert len(reader.pages) == 2
+    for page in reader.pages:
+        text = ''.join(page.extract_text().split())
+        assert 'https://example.invalid/house-lights/s/' + new['alias'] in text
+    assert template.read_bytes() == original
+
+
+def test_concurrent_owner_confirmations_commit_one_invitation(hosted):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    app = enabled(hosted)
+    _, headers, state = invoke(app, '/api/invitation', cookie='EXISTING_OWNER_COOKIE=synthetic')
+    owner = 'EXISTING_OWNER_COOKIE=synthetic; ' + headers['Set-Cookie'].split(';')[0]
+    body = {'revision': state['revision'], 'confirmation': 'replace'}
+    barrier = Barrier(2)
+    original_prepare = app.app.people.invitation_cards.prepare
+    def prepare(candidate):
+        original_prepare(candidate)
+        barrier.wait(timeout=5)
+    app.app.people.invitation_cards.prepare = prepare
+    def replace():
+        return invoke(app, '/api/invitation', body, owner, state['csrf'])[0]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        statuses = list(pool.map(lambda _: replace(), range(2)))
+    assert sorted(statuses) == [200, 409]
+    assert app.app.store.invitation_revision() != state['revision']
+
+
+def test_invitation_routes_require_current_owner_and_write_switch(hosted):
+    app, switches = hosted
+    enabled(hosted)
+    original = app.app.store.invitation()
+    for path in ('/api/invitation', '/invitation-card', '/invitation.pdf'):
+        assert invoke(app, path)[0] == 403
+        assert invoke(app, path, HTTP_REMOTE_USER='CONFIGURED_OWNER_IDENTITY')[0] == 403
+        assert invoke(app, path, cookie='EXISTING_OWNER_COOKIE=synthetic', HTTP_X_HL_APACHE_PEER='')[0] == 403
+    _, headers, state = invoke(app, '/api/invitation', cookie='EXISTING_OWNER_COOKIE=synthetic')
+    owner = 'EXISTING_OWNER_COOKIE=synthetic; ' + headers['Set-Cookie'].split(';')[0]
+    body = {'revision': state['revision'], 'confirmation': 'replace'}
+    switches(people_write_enabled=False)
+    assert invoke(app, '/api/invitation', body, owner, state['csrf'])[0] == 403
+    switches(people_write_enabled=True)
+    class PausedBody(BytesIO):
+        def read(self, *args):
+            switches(people_write_enabled=False)
+            return super().read(*args)
+    assert invoke(app, '/api/invitation', body, owner, state['csrf'], **{'wsgi.input': PausedBody(json.dumps(body).encode())})[0] == 403
+    assert app.app.store.invitation() == original
+    switches(people_write_enabled=True)
+    def pause_after_render(candidate):
+        switches(people_write_enabled=False)
+    app.app.people.invitation_cards.prepare = pause_after_render
+    assert invoke(app, '/api/invitation', body, owner, state['csrf'])[0] == 403
+    assert app.app.store.invitation() == original
+
+
+def test_bad_template_cannot_retire_current_invitation(hosted, tmp_path):
+    app = enabled(hosted)
+    _, headers, state = invoke(app, '/api/invitation', cookie='EXISTING_OWNER_COOKIE=synthetic')
+    owner = 'EXISTING_OWNER_COOKIE=synthetic; ' + headers['Set-Cookie'].split(';')[0]
+    original = app.app.store.invitation()
+    app.app.people.invitation_cards.template = tmp_path / 'missing-private.pdf'
+    assert invoke(app, '/api/invitation', {'revision': state['revision'], 'confirmation': 'replace'}, owner, state['csrf'])[0] == 400
+    assert app.app.store.invitation() == original
