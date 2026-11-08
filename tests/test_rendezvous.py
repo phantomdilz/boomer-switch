@@ -332,3 +332,29 @@ def test_hosted_poll_accepts_display_limit(house, field):
     metadata = {**LIGHT, field: "x" * 120}
     poll(rv, 1, light=metadata)
     assert rv.display(raw, env()) == metadata
+
+
+def test_source_mismatch_survives_idle_heartbeats_without_device_authority(house):
+    rv, store, raw, clock = house
+    poll(rv, 1)
+    for sequence in (2, 3, 4):
+        clock[0] += rv.idle
+        poll(rv, sequence)
+        assert rv.access_status(raw, env(CELL)) == "source_mismatch"
+        clock[0] += rv.FRESH
+        assert rv.access_status(raw, env(CELL)) == "source_mismatch"
+        assert rv.access(raw, env()) is False
+        with pytest.raises((AccessDenied, HomeUnavailable)):
+            rv.enqueue(raw, env(), {"operation_id": str(uuid.uuid4()), "action": "on"})
+    clock[0] += rv.idle
+    assert rv.access_status(raw, env(CELL)) == "unavailable"
+    poll(rv, 5)
+    assert rv.access_status(raw, env(CELL)) == "source_mismatch"
+
+
+def test_active_home_observation_cannot_claim_mismatch_after_freshness_expires(house):
+    rv, store, raw, clock = house
+    poll(rv, 1)
+    assert rv.access_status(raw, env(CELL)) == "source_mismatch"
+    clock[0] += rv.FRESH
+    assert rv.access_status(raw, env(CELL)) == "unavailable"

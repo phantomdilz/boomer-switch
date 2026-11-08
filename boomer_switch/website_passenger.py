@@ -5,10 +5,6 @@ from http.cookies import SimpleCookie
 import ipaddress
 import json
 from pathlib import Path
-import subprocess
-import os
-import select
-import time
 from urllib.parse import urlsplit
 
 from .registration import AccessDenied
@@ -16,6 +12,8 @@ from .website import OWNER_PATHS, REGISTRATION_MAIL_PATHS
 from .website_cgi import create_application
 from .website_grants import json_object
 from .website_mail import MailPaused
+from .private_process import exact_private_reply, private_command
+from .owner_notifications import OWNER_DECISION_PATH
 
 
 SWITCHES = {"registration_enabled", "mail_enabled", "people_write_enabled", "pilot_enabled", "apache_peer_verified"}
@@ -25,10 +23,7 @@ class PHPValidator:
     """Pass one bounded cookie to the existing private foreground PHP validator."""
 
     def __init__(self, command, cookie_name):
-        if (not isinstance(command, list) or not 1 <= len(command) <= 16
-                or any(not isinstance(item, str) or not item or len(item) > 4096 or "\0" in item for item in command)
-                or not Path(command[0]).is_absolute()):
-            raise ValueError("Configure the absolute private owner-validator command.")
+        command = private_command(command)
         if not isinstance(cookie_name, str) or not cookie_name or len(cookie_name) > 128 or any(char in cookie_name for char in " ;=\r\n"):
             raise ValueError("Configure the existing owner cookie name.")
         self.command, self.cookie_name = tuple(command), cookie_name
@@ -44,49 +39,7 @@ class PHPValidator:
             value = cookies[self.cookie_name].value.encode("utf-8")
             if not 0 < len(value) <= 1024:
                 return False
-            process = subprocess.Popen(self.command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL, close_fds=True, bufsize=0)
-            try:
-                process.stdin.write(value)
-                process.stdin.close()
-                deadline, data = time.monotonic()+2, b''
-                while len(data) < 6:
-                    remaining = deadline-time.monotonic()
-                    if remaining <= 0:
-                        return False
-                    if os.name == 'nt':
-                        import ctypes
-                        import msvcrt
-                        available = ctypes.c_ulong()
-                        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
-                        peek = kernel.PeekNamedPipe
-                        peek.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong), ctypes.c_void_p]
-                        peek.restype = ctypes.c_int
-                        if not peek(msvcrt.get_osfhandle(process.stdout.fileno()), None, 0, None, ctypes.byref(available), None):
-                            if ctypes.get_last_error() == 109:
-                                break
-                            return False
-                        if not available.value:
-                            time.sleep(min(0.01, remaining))
-                            continue
-                        length = min(available.value, 6-len(data))
-                    else:
-                        if not select.select([process.stdout], [], [], remaining)[0]:
-                            return False
-                        length = 6-len(data)
-                    chunk = os.read(process.stdout.fileno(), length)
-                    if not chunk:
-                        break
-                    data += chunk
-                process.wait(timeout=max(0.001, deadline-time.monotonic()))
-                return process.returncode == 0 and data == b"MATCH"
-            finally:
-                if process.poll() is None:
-                    process.kill()
-                    process.wait(timeout=1)
-                for pipe in (process.stdin, process.stdout):
-                    if pipe is not None:
-                        pipe.close()
+            return exact_private_reply(self.command, value, b"MATCH")
         except Exception:
             return False
 
@@ -115,6 +68,9 @@ class _GuardedMail:
         if not enabled:
             raise MailPaused("Website mail is paused.")
         self.transport.send(message)
+
+    def prepare(self, db, row):
+        return self.transport.prepare(db, row)
 
 
 def _read_config(path):
@@ -147,6 +103,8 @@ class PassengerApplication:
         self.validator = validator_factory(policy["owner_validator_command"], policy["owner_cookie"])
         self.app = factory(self.config)
         self.app.mail.transport = _GuardedMail(self.app.mail.transport, self._mail_enabled)
+        if self.app.mail.owner_notifications is not None:
+            self.app.mail.owner_notifications = _GuardedMail(self.app.mail.owner_notifications, self._mail_enabled)
 
     def _policy(self):
         current = _read_config(self.config_path)
@@ -175,6 +133,8 @@ class PassengerApplication:
         environ["boomer.direct_peer"] = proof and (policy["pilot_enabled"] or path == "/home/result")
         if path in OWNER_PATHS and (not proof or (method == "POST" and not policy["people_write_enabled"])):
             raise AccessDenied("Private People access is paused or unverified.")
+        if path == OWNER_DECISION_PATH and (not proof or not policy['people_write_enabled']):
+            raise AccessDenied("Owner decisions are paused or unverified.")
         if method == "POST" and path == "/api/invite" and not policy["registration_enabled"]:
             raise AccessDenied("Website registration is paused.")
         if method == "POST" and path in REGISTRATION_MAIL_PATHS and not (policy["registration_enabled"] and policy["mail_enabled"]):
