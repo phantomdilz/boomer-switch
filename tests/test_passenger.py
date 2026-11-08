@@ -39,10 +39,14 @@ def hosted(tmp_path, monkeypatch):
     config = json.loads(Path('hosting/passenger-config.example.json').read_text())
     config['state_directory'] = str(tmp_path / 'state')
     config['service_key'] = 'k'*40
+    notice_log = tmp_path / 'notices.jsonl'
+    notice_script = 'import pathlib,sys; p=pathlib.Path('+repr(str(notice_log))+'); p.open("ab").write(sys.stdin.buffer.read()+b"\\n"); sys.stdout.write("SENT")'
+    config['owner_notifications'] = {'command': [sys.executable, '-c', notice_script], 'decision_key': 'd'*40}
     config['passenger']['owner_validator_command'] = [sys.executable]
     path = tmp_path / 'config.local.passenger.json'
     path.write_text(json.dumps(config))
     app = PassengerApplication(path, validator_factory=Validator)
+    app.notice_log = notice_log
 
     def switches(**changes):
         config['passenger'].update(changes)
@@ -82,7 +86,8 @@ def verified(app):
     transport = app.app.mail.transport.transport
     code = re.search(r'\b[0-9]{6}\b', transport.messages[-1].get_content()).group()
     assert invoke(app, '/api/verify', {'code': code}, cookie, csrf)[2]['status'] == 'pending'
-    assert len(transport.messages) == 2
+    assert len(transport.messages) == 1
+    assert len(app.notice_log.read_text().splitlines()) == 1
     return cookie, csrf
 
 
@@ -223,7 +228,8 @@ def test_paused_unsent_owner_notice_is_delivered_once_after_resume(hosted):
     assert not app.app.mail.transport.transport.messages
     hosted[1](mail_enabled=True)
     assert app.app.mail.deliver() == 1
-    assert str(app.app.mail.transport.transport.messages[0]['To']) == 'owner@example.invalid'
+    assert not app.app.mail.transport.transport.messages
+    assert len(app.notice_log.read_text().splitlines()) == 1
     assert app.app.mail.deliver() == 0
 
 

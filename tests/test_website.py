@@ -291,7 +291,7 @@ def test_expired_code_is_discarded_without_external_send(hosted):
     raw = store.browser(store.invitation()['token'])
     store.start(raw, 'Guest', 'guest@example.invalid')
     now = store.clock()
-    store.clock = lambda: now + 301
+    store.clock = lambda: now + 601
     assert app.mail.deliver() == 0 and not transport.messages
     with store._transaction() as db:
         assert db.execute('SELECT state FROM mail_delivery').fetchone()[0] == 'discarded'
@@ -428,7 +428,7 @@ def test_actual_cgi_entry_uses_fake_mail_and_current_source_rendezvous(tmp_path)
     assert home('authorize',4,assignment,source_b)[2]['allowed'] is False
     assert cgi('/grant','POST',{},auth='Bearer '+'k'*40)[0]==404
     assert cgi('/exchange','POST',{},auth='Bearer '+'k'*40)[0]==404
-    assert [json.loads(line)['to'] for line in inbox.read_text().splitlines()] == ['guest@example.invalid','owner@example.invalid']
+    assert [json.loads(line)['to'] for line in inbox.read_text().splitlines()] == ['guest@example.invalid']
 
 
 def test_card_origin_approved_guest_receives_only_fixed_home_entry(hosted):
@@ -441,7 +441,7 @@ def test_card_origin_approved_guest_receives_only_fixed_home_entry(hosted):
     assert invoke(app, '/api/handoff', 'POST', {'challenge':'c'*43,'state':'s'*43,'callback':'https://other.invalid/'},cookie,result['csrf'])[0] == 400
 
 
-def test_native_php_bridge_runs_real_cgi_and_keeps_site_owner_cookie_private(tmp_path):
+def test_native_php_bridge_runs_real_cgi_and_keeps_site_owner_cookie_private(tmp_path, php_runtime):
     import os
     from pathlib import Path
     import socket
@@ -449,9 +449,7 @@ def test_native_php_bridge_runs_real_cgi_and_keeps_site_owner_cookie_private(tmp
     import sys
     import time
     from http.client import HTTPConnection
-    php = Path(__file__).resolve().parents[1] / 'data/php-runtime/bin/php.exe'
-    if not php.exists():
-        pytest.skip('The optional native PHP runtime is unavailable.')
+    php = php_runtime
     root = Path(__file__).resolve().parents[1]
     release = tmp_path / 'release'
     package = release / 'boomer_switch'
@@ -586,3 +584,47 @@ def test_hosted_fixture_idle_bare_tcp_does_not_block_https_or_shutdown(tmp_path)
             cleanup.start()
         cleanup.join(timeout=3)
         worker.join(timeout=3)
+
+
+@pytest.mark.parametrize("condition, expected", [
+    ("home", "ready"), ("different_source", "source_mismatch"),
+    ("offline", "unavailable"), ("unknown_source", "unavailable"),
+])
+def test_approved_refresh_distinguishes_known_mismatch_from_unavailable(hosted, condition, expected):
+    from boomer_switch.home_rendezvous import HomeRendezvous
+    from test_rendezvous import A, CELL, LIGHT, KEY, AGENT, env
+
+    app, store, _ = hosted
+    cookie, _ = verify(hosted)
+    store.operator("approve", "guest@example.invalid")
+    app.rendezvous = HomeRendezvous(store, KEY)
+    now = store.clock()
+    store.clock = lambda: now
+    app.rendezvous.access(cookie.split("=", 1)[1], env())
+    app.rendezvous.machine(env(), "/home/poll", {
+        "agent_id": AGENT, "sequence": 1, "request_id": str(uuid.uuid4()), "light": LIGHT})
+    if condition == "offline":
+        store.clock = lambda: now + app.rendezvous.idle + app.rendezvous.FRESH
+    source = CELL if condition in ("different_source", "offline") else A
+    peer = env(source)
+    peer.pop("HTTP_AUTHORIZATION")
+    if condition == "unknown_source":
+        peer.pop("boomer.direct_peer")
+    status, _, payload = invoke(app, "/api/access", cookie=cookie, **peer)
+    result = json.loads(payload)
+    assert status == 200 and result["status"] == "approved"
+    assert result["home_status"] == expected
+    assert result["home_ready"] is (expected == "ready")
+    assert ("light" in result) is (expected == "ready")
+    assert A not in payload.decode() and CELL not in payload.decode()
+    store.operator("revoke", "guest@example.invalid")
+    result = json.loads(invoke(app, "/api/access", cookie=cookie, **peer)[2])
+    assert "home_status" not in result and "light" not in result
+
+
+def test_verification_mail_states_ten_minute_lifetime(hosted):
+    app, store, transport = hosted
+    raw = store.browser(store.invitation()["token"])
+    store.start(raw, "Guest", "guest@example.invalid")
+    assert app.mail.deliver() == 1
+    assert "expires in 10 minutes" in transport.messages[-1].get_content()

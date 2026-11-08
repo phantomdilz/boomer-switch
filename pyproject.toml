@@ -25,7 +25,7 @@ include = ["boomer_switch*"]
 boomer_switch = ["web/*.html", "web/*.css", "web/*.js"]
 
 [tool.setuptools.data-files]
-"share/boomer-switch/hosting" = ["hosting/passenger_wsgi.py", "hosting/passenger-config.example.json", "hosting/index.php"]
+"share/boomer-switch/hosting" = ["hosting/passenger_wsgi.py", "hosting/passenger-config.example.json", "hosting/index.php", "hosting/owner_telegram.php", "hosting/owner_telegram_cli.php", "hosting/prepare_owner_bot.py"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -29,8 +29,8 @@
   </form>
   <form id="verification" hidden>
     <fieldset disabled>
-    <label for="code">Verification code</label>
-    <input id="code" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required>
+    <p id="code-help">The code expires after 10 minutes.</p><label for="code">Verification code</label>
+    <input id="code" aria-describedby="code-help" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required>
     <button id="verify-code" type="submit">Verify code</button>
     <button id="resend-code" type="button">Send new code</button>
     </fieldset>

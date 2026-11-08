@@ -29,7 +29,7 @@ def _digest(value: str) -> str:
 class RegistrationStore:
     """Keep demo registration and fake mail in one SQLite transaction owner."""
 
-    CODE_SECONDS = 300
+    CODE_SECONDS = 600
     WINDOW_SECONDS = 900
     RESEND_SECONDS = 30
     MAX_SENDS = 3
@@ -326,31 +326,34 @@ class RegistrationStore:
         if action != "expiry" and expires is not None:
             raise ValueError("Use the end-date action to change a deadline.")
         with self._transaction() as db:
-            current = db.execute("SELECT * FROM guests WHERE email=?", (email,)).fetchone()
-            if current is None:
-                if action != "preapprove" or revision is not None:
-                    raise StalePerson("Refresh People before this action.")
-                db.execute("INSERT INTO guests(email,name,status,email_verified) VALUES (?,'','approved',0)", (email,))
-                return
-            if type(revision) is not int or revision != current["revision"]:
-                raise StalePerson("This person changed. Refresh People before this action.")
-            if action == "preapprove":
-                if current["status"] not in ("denied", "revoked"):
-                    raise StalePerson("This person already has a current request or approval.")
-                db.execute("UPDATE guests SET status='approved',expires=NULL,revision=revision+1 WHERE email=?", (email,))
-            elif action == "approve" and current["status"] == "pending" and current["email_verified"]:
-                db.execute("UPDATE guests SET status='approved',expires=NULL,revision=revision+1 WHERE email=?", (email,))
-            elif action in ("deny", "remove") and current["status"] == ("pending" if action == "deny" else "approved"):
-                db.execute("UPDATE guests SET status=?,revision=revision+1 WHERE email=?", ("denied" if action == "deny" else "revoked", email))
+            self._change_person(db, action, email, revision, expires=expires)
+
+    def _change_person(self, db, action, email, revision, *, expires=None):
+        current = db.execute("SELECT * FROM guests WHERE email=?", (email,)).fetchone()
+        if current is None:
+            if action != "preapprove" or revision is not None:
+                raise StalePerson("Refresh People before this action.")
+            db.execute("INSERT INTO guests(email,name,status,email_verified) VALUES (?,'','approved',0)", (email,))
+            return
+        if type(revision) is not int or revision != current["revision"]:
+            raise StalePerson("This person changed. Refresh People before this action.")
+        if action == "preapprove":
+            if current["status"] not in ("denied", "revoked"):
+                raise StalePerson("This person already has a current request or approval.")
+            db.execute("UPDATE guests SET status='approved',expires=NULL,revision=revision+1 WHERE email=?", (email,))
+        elif action == "approve" and current["status"] == "pending" and current["email_verified"]:
+            db.execute("UPDATE guests SET status='approved',expires=NULL,revision=revision+1 WHERE email=?", (email,))
+        elif action in ("deny", "remove") and current["status"] == ("pending" if action == "deny" else "approved"):
+            db.execute("UPDATE guests SET status=?,revision=revision+1 WHERE email=?", ("denied" if action == "deny" else "revoked", email))
+            db.execute("DELETE FROM sessions WHERE email=?", (email,))
+            db.execute("DELETE FROM challenges WHERE email=?", (email,))
+        elif action == "expiry" and current["status"] == "approved":
+            if not self._active(current) or (expires is not None and expires <= self.clock()):
                 db.execute("DELETE FROM sessions WHERE email=?", (email,))
                 db.execute("DELETE FROM challenges WHERE email=?", (email,))
-            elif action == "expiry" and current["status"] == "approved":
-                if not self._active(current) or (expires is not None and expires <= self.clock()):
-                    db.execute("DELETE FROM sessions WHERE email=?", (email,))
-                    db.execute("DELETE FROM challenges WHERE email=?", (email,))
-                db.execute("UPDATE guests SET expires=?,revision=revision+1 WHERE email=?", (expires, email))
-            else:
-                raise StalePerson("This action no longer matches the person's status.")
+            db.execute("UPDATE guests SET expires=?,revision=revision+1 WHERE email=?", (expires, email))
+        else:
+            raise StalePerson("This action no longer matches the person's status.")
 
     def mailbox(self, email):
         with self._transaction() as db:

@@ -14,9 +14,10 @@ from .mail_signing import MessagePreparationError, message_bytes
 class WebsiteMail:
     """Claim each message once and retain ambiguous outcomes without automatic retry."""
 
-    def __init__(self, store, transport, sender, owner):
+    def __init__(self, store, transport, sender, owner=None, *, owner_notifications=None):
         self.store, self.transport = store, transport
-        self.sender, self.owner = store._email(sender), store._email(owner)
+        self.sender, self.owner = store._email(sender), store._email(owner) if owner is not None else None
+        self.owner_notifications = owner_notifications
         with store._transaction() as db:
             environment = db.execute("SELECT value FROM settings WHERE key='store_mode'").fetchone()
             if environment is None or environment[0] != 'production':
@@ -50,21 +51,28 @@ class WebsiteMail:
                     db.execute("INSERT INTO mail_delivery VALUES (?, 'discarded')", (row["id"],))
                     db.execute("UPDATE mailbox SET code=NULL WHERE id=?", (row["id"],))
                     continue
+                if row['kind'] != 'code' and self.owner_notifications is None and self.owner is None:
+                    db.execute("INSERT INTO mail_delivery VALUES (?, 'manual')", (row['id'],))
+                    continue
                 db.execute("INSERT INTO mail_delivery VALUES (?, 'unknown')", (row["id"],))
-                message = EmailMessage()
-                message["From"] = self.sender
-                message["To"] = row["email"] if row["kind"] == "code" else self.owner
-                message["Message-ID"] = f"<house-lights-{row['id']}.{self.store._setting(db, 'mail_identity')}@localhost>"
-                if row["kind"] == "code":
-                    message["Subject"] = "House Lights verification code"
-                    message.set_content(f"Your verification code is {row['code']}. It expires in 5 minutes.\n")
+                owner_notice = row['kind'] != 'code' and self.owner_notifications is not None
+                if owner_notice:
+                    message = self.owner_notifications.prepare(db, row)
                 else:
-                    message["Subject"] = "House Lights access request"
-                    message.set_content(f"A verified guest requests access. Open the private People page.\nName: {row['name']}\nEmail: {row['email']}\n")
+                    message = EmailMessage()
+                    message["From"] = self.sender
+                    message["To"] = row["email"] if row["kind"] == "code" else self.owner
+                    message["Message-ID"] = f"<house-lights-{row['id']}.{self.store._setting(db, 'mail_identity')}@localhost>"
+                    if row["kind"] == "code":
+                        message["Subject"] = "House Lights verification code"
+                        message.set_content(f"Your verification code is {row['code']}. It expires in {self.store.CODE_SECONDS // 60} minutes.\n")
+                    else:
+                        message["Subject"] = "House Lights access request"
+                        message.set_content(f"A verified guest requests access. Open the private People page.\nName: {row['name']}\nEmail: {row['email']}\n")
                 # OTP plaintext leaves durable storage before the external attempt.
                 db.execute("UPDATE mailbox SET code=NULL WHERE id=?", (row["id"],))
             try:
-                self.transport.send(message)
+                (self.owner_notifications if owner_notice else self.transport).send(message)
             except (MailPaused, MessagePreparationError):
                 # No provider attempt occurred. Keep the unsent message recoverable.
                 with self.store._transaction() as db:
@@ -74,6 +82,9 @@ class WebsiteMail:
             except Exception:
                 # The provider can accept a message before the connection fails.
                 # Keep the claim and never retry this operation automatically.
+                if owner_notice:
+                    # Inbox proof succeeded. People remains the manual owner fallback.
+                    continue
                 raise MailUnavailable("Mail delivery is unconfirmed. Wait before requesting a new code.") from None
             with self.store._transaction() as db:
                 db.execute("UPDATE mail_delivery SET state='sent' WHERE id=?", (row["id"],))

@@ -15,7 +15,7 @@ The [Passenger installation contract](docs/HOSTED_REGISTRATION.md#passenger-and-
 ## Architecture
 - **Guest web app** — House Lights page and registration flow.
 - **Home service** — always-on home server running [python-kasa](https://github.com/python-kasa/python-kasa) on the main network. It keeps device credentials and the allowlist private and polls the hosted website over authenticated outbound HTTPS. It opens no guest or public listener.
-- **Owner admin** — private People page on the owner's website, behind the owner's sign-in. The website manages permissions and sends verification codes and owner notices through its existing mail system.
+- **Owner admin** — private People page on the owner's website, behind the owner's sign-in. The website manages permissions and sends guest verification codes through its existing mail system. Verified pending requests use the [private owner bot](docs/OWNER_NOTIFICATIONS.md), with signed Approve/Deny buttons and a People link.
 - **Command checks** — the website requires verified identity, current owner permission, and matching server-observed public IPv4 egress for the guest and home. The home runner rechecks permission, source generation, and expiry immediately before dispatch. Unknown checks fail closed. The website refreshes the home's observed ISP address automatically. Public egress matching does not prove physical Wi-Fi presence.
 
 See [docs/BRIEF.md](docs/BRIEF.md) for the full brief and [AGENTS.md](AGENTS.md) for contribution rules.
@@ -71,6 +71,10 @@ Stop the demo with Ctrl+C.
 The optional `demo` extra declares Playwright for `demos/mobile_acceptance.py`.
 That script checks the mobile page with Firefox and uses only sample devices.
 
+`demos/mobile_layout_acceptance.py` checks the hosted and local sample controls at 320 and 375 pixels, with normal and 200% text.
+It rejects overlaps, horizontal overflow, split button words, and disabled-button contrast below 4.5:1.
+It also checks registration, People, and connection alerts through isolated API fixtures and saves screenshots in `.test-runs/pj78-mobile`.
+
 For synthetic external changes, send JSON to `POST /demo/fixtures`:
 `{"light_id":"sofa-lamp","state":"on"}`.
 Use `off` for an external off state or `unavailable` for a persistent sample failure.
@@ -113,7 +117,7 @@ Rotation retires the old invitation and short alias. It preserves verified bookm
 The registration server checks current approval, expiration, and revocation before each control command.
 The local `approve` hook also accepts an optional finite Unix timestamp with `--expires-at`.
 
-Codes expire after 5 minutes.
+Codes expire after 10 minutes.
 Each email has at most 5 verification attempts and 3 code sends per 15-minute window, with a 30-second resend delay.
 The whole demo also permits at most 20 code sends per 15-minute window across all emails.
 These counters survive restarts and rotation. Unverified requests never create a pending guest or an owner notice.
@@ -199,5 +203,8 @@ This project uses the [MIT License](LICENSE).
 ## Validation still required
 
 The approved external route uses authenticated outbound HTTPS and server-observed public IPv4 egress matching.
+An approved guest sees a red alert when their connection differs from the last reported home connection.
+An unavailable or stale home connection has a separate message. The page checks again automatically.
+These messages do not extend command permission or prove physical Wi-Fi presence.
 The real hosted source topology, ISP refresh, mail, and physical guest acceptance still require validation.
 No live setup or device operation follows from the synthetic test results.
