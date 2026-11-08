@@ -185,6 +185,17 @@ The reusable WSGI hosting adapter validates trusted `REMOTE_USER` against a conf
 See [the owner hosting contract](docs/OWNER_HOSTING.md) for HTTPS, routing, session, and integration requirements.
 The website hosting and website-to-home permission transport remain unverified and undeployed. The local demonstration controls only synthetic devices.
 
+## Owner invitation cards
+
+The owner's People page can replace the invitation after a separate confirmation.
+The old QR and typed address stop working. Existing approvals and bookmarks stay valid.
+Open the current card to print its QR and typed address without replacing it.
+
+For the retained two-design PDF, install the `pdf` extra and set the private
+`invitation_template` configuration to the absolute path of the blank master outside the document root.
+The application worker needs read access to that file. The master stays unchanged.
+Keep the invitation API and card routes behind owner login, as listed in [the hosting guide](docs/HOSTED_REGISTRATION.md).
+
 ## Synthetic tests
 
 Use Python 3.11 or later.

@@ -5,6 +5,7 @@
   "owner_identity": "CONFIGURED_OWNER_IDENTITY",
   "service_key": "REPLACE_WITH_PRIVATE_RANDOM_SERVICE_KEY",
   "idle_poll_seconds": 15,
+  "invitation_template": null,
   "mail": {
     "transport": "sendmail",
     "executable": "/PRIVATE_SENDMAIL_EXECUTABLE",

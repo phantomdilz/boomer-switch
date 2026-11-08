@@ -16,6 +16,19 @@
   </header>
   <p id="people-status" role="status">Checking people…</p>
   <button id="refresh-people" type="button">Refresh requests</button>
+  <section id="invitation" hidden>
+    <h2>Invitation card</h2>
+    <p>Print the current card without changing it. Approved guests keep their access and bookmarks after replacement.</p>
+    <p><a id="print-invitation" href="invitation-card" target="_blank" rel="noopener">Open current QR and typed address</a></p>
+    <p><a id="invitation-pdf" href="invitation.pdf" target="_blank" rel="noopener" hidden>Print the two-design PDF</a></p>
+    <button id="replace-invitation" type="button">Replace invitation</button>
+    <div id="replace-warning" hidden>
+      <p>The old QR code and typed address will stop working. Replace any printed cards. Existing approvals and bookmarks stay valid.</p>
+      <button id="confirm-replace" type="button">Replace invitation now</button>
+      <button id="cancel-replace" type="button">Keep current invitation</button>
+    </div>
+    <p id="invitation-status" role="status"></p>
+  </section>
   <section>
     <h2>Add person</h2>
     <p>Approve an email in advance. The guest must still verify that inbox.</p>

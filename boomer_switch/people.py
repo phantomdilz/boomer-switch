@@ -10,7 +10,10 @@ import secrets
 import time
 from urllib.parse import quote
 
-from .registration import AccessDenied, RegistrationStore, StalePerson
+from .registration import AccessDenied, RegistrationStore, StalePerson, StaleInvitation
+
+
+INVITATION_PATHS = ("/api/invitation", "/invitation-card", "/invitation.pdf")
 
 
 @dataclass(frozen=True)
@@ -100,8 +103,8 @@ class RemoteUserOwnerAuth:
 class PeopleApplication:
     """Project only owner-authorized records and commit versioned People actions."""
 
-    def __init__(self, store):
-        self.store = store
+    def __init__(self, store, *, invitation_cards=None):
+        self.store, self.invitation_cards = store, invitation_cards
 
     @staticmethod
     def _owner(environ):
@@ -125,7 +128,9 @@ class PeopleApplication:
             elif method == "GET" and path == "/style.css":
                 content_type = "text/css; charset=utf-8"
                 payload = files("boomer_switch").joinpath("web", "style.css").read_bytes()
-            elif path == "/api/people" and method in ("GET", "POST"):
+            elif path in ("/api/people", "/api/invitation") and method in ("GET", "POST"):
+                if path == "/api/invitation" and self.invitation_cards is None:
+                    raise ValueError("Invitation cards are unavailable on this host.")
                 if method == "POST":
                     length = int(environ.get("CONTENT_LENGTH") or "0")
                     if not 0 < length <= 4096 or environ.get("CONTENT_TYPE", "").split(";")[0] != "application/json":
@@ -135,20 +140,34 @@ class PeopleApplication:
                     csrf = environ.get("HTTP_X_CSRF_TOKEN", "")
                     if not isinstance(csrf, str) or not hmac.compare_digest(csrf.encode(), principal.csrf.encode()):
                         raise AccessDenied("Refresh People before this action.")
-                    expected = {"action", "email", "revision"}
+                    expected = {"revision", "confirmation"} if path == "/api/invitation" else {"action", "email", "revision"}
                     if isinstance(body, dict) and body.get("action") == "expiry":
                         expected.add("expires")
                     if not isinstance(body, dict) or set(body) != expected:
                         raise ValueError("Use a valid People request.")
-                    self.store.change_person(body["action"], body["email"], body["revision"], expires=body.get("expires"))
-                payload = {"people": self.store.people(), "csrf": principal.csrf}
+                    if path == "/api/invitation":
+                        if body["confirmation"] != "replace" or not isinstance(body["revision"], str) or len(body["revision"]) != 64:
+                            raise ValueError("Confirm invitation replacement.")
+                        def prepare_invitation(candidate):
+                            self.invitation_cards.prepare(candidate)
+                            self._owner(environ)
+                        self.store.rotate(body["revision"], prepare=prepare_invitation)
+                    else:
+                        self.store.change_person(body["action"], body["email"], body["revision"], expires=body.get("expires"))
+                payload = ({"revision": self.store.invitation_revision(), "pdf_available": self.invitation_cards.template is not None,
+                            "csrf": principal.csrf} if path == "/api/invitation" else {"people": self.store.people(), "csrf": principal.csrf})
+            elif method == "GET" and path in ("/invitation-card", "/invitation.pdf") and self.invitation_cards is not None:
+                if path == "/invitation.pdf":
+                    content_type, payload = "application/pdf", self.invitation_cards.pdf()
+                else:
+                    content_type, payload = "text/html; charset=utf-8", self.invitation_cards.html()
             else:
                 status, payload = "404 Not Found", {"error": "Page unavailable."}
         except AccessDenied as error:
             status, payload = "403 Forbidden", {"error": str(error)}
-        except StalePerson as error:
+        except (StalePerson, StaleInvitation) as error:
             status, payload = "409 Conflict", {"error": str(error)}
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, OSError):
             status, payload = "400 Bad Request", {"error": "Use a valid People request."}
         if isinstance(payload, dict):
             payload = json.dumps(payload).encode()

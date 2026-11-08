@@ -123,5 +123,51 @@ document.querySelector("#refresh-people").addEventListener("click", async () => 
   try { people = await peopleRequest(); render(); peopleStatus.textContent = "People ready."; }
   catch { pendingPeople.replaceChildren(); approvedPeople.replaceChildren(); peopleStatus.textContent = "People unavailable. Sign in as the owner and refresh."; }
 });
-peopleRequest().then(result => { people = result; render(); peopleStatus.textContent = "People ready."; })
+peopleRequest().then(result => { people = result; render(); peopleStatus.textContent = "People ready.";
+  invitationRequest().catch(() => { invitationSection.hidden = true; }); })
   .catch(() => { peopleStatus.textContent = "People unavailable. Sign in as the owner and refresh."; });
+
+let invitationRevision = null;
+let replacingInvitation = false;
+const invitationSection = document.querySelector("#invitation");
+const invitationStatus = document.querySelector("#invitation-status");
+const replacementWarning = document.querySelector("#replace-warning");
+async function invitationRequest(body) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch("api/invitation", {method: body ? "POST" : "GET", cache: "no-store", signal: controller.signal,
+      headers: body ? {"Content-Type": "application/json", "X-CSRF-Token": csrf} : {},
+      body: body ? JSON.stringify(body) : undefined});
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Invitation unavailable.");
+    if (!/^[a-f0-9]{64}$/.test(result.revision) || typeof result.csrf !== "string") throw new Error("Invitation unavailable.");
+    csrf = result.csrf;
+    invitationRevision = result.revision;
+    document.querySelector("#invitation-pdf").hidden = result.pdf_available !== true;
+    invitationSection.hidden = false;
+  } finally { clearTimeout(timeout); }
+}
+document.querySelector("#replace-invitation").addEventListener("click", () => {
+  if (replacingInvitation || changing || !invitationRevision) return;
+  replacementWarning.hidden = false;
+  document.querySelector("#cancel-replace").focus();
+});
+document.querySelector("#cancel-replace").addEventListener("click", () => { replacementWarning.hidden = true; });
+document.querySelector("#confirm-replace").addEventListener("click", async () => {
+  if (replacingInvitation || changing || !invitationRevision || replacementWarning.hidden) return;
+  replacingInvitation = true;
+  const revision = invitationRevision;
+  replacementWarning.hidden = true;
+  document.querySelector("#replace-invitation").disabled = true;
+  try {
+    await invitationRequest({revision, confirmation: "replace"});
+    invitationStatus.textContent = "Invitation replaced. Print the new card.";
+  } catch {
+    invitationRevision = null;
+    invitationStatus.textContent = "The result is unconfirmed. Reload People and open the current card before you replace it again.";
+  } finally {
+    replacingInvitation = false;
+    document.querySelector("#replace-invitation").disabled = invitationRevision === null;
+  }
+});
