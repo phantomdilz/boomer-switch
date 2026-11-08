@@ -23,6 +23,9 @@ include = ["boomer_switch*"]
 [tool.setuptools.package-data]
 boomer_switch = ["web/*.html", "web/*.css", "web/*.js"]
 
+[tool.setuptools.data-files]
+"share/boomer-switch/hosting" = ["hosting/passenger_wsgi.py", "hosting/passenger-config.example.json", "hosting/index.php"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-markers"
