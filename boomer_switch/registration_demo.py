@@ -73,19 +73,22 @@ class _RegistrationHandler(_DemoHandler):
                 self._reply(403, {"error": str(error)})
 
     def do_POST(self):
+        length = None
         try:
             origin = self.headers.get("Origin")
             if origin is not None and origin != f"http://localhost:{self.server.server_port}":
-                raise AccessDenied("Open the local registration page.")
+                self._reject_unread_body(None, status=403, body={"error": "Open the local registration page."})
+                return
             if self.path.startswith("/api/lights/"):
                 super().do_POST()
                 return
             if self.path not in ("/api/register", "/api/verify", "/api/resend"):
-                self._reply(404, {"error": "Page unavailable."})
+                self._reject_unread_body(None, status=404, body={"error": "Page unavailable."})
                 return
             length = int(self.headers.get("Content-Length", "0"))
             if not 0 < length <= 2048 or self.headers.get_content_type() != "application/json":
-                raise ValueError
+                self._reject_unread_body(length, body={"error": "Use a valid registration request."})
+                return
             body = json.loads(self.rfile.read(length))
             if not isinstance(body, dict):
                 raise ValueError
@@ -102,7 +105,10 @@ class _RegistrationHandler(_DemoHandler):
         except AccessDenied as error:
             self._reply(403, {"error": str(error)})
         except (ValueError, TypeError):
-            self._reply(400, {"error": "Use a valid registration request."})
+            if length is None:
+                self._reject_unread_body(None, body={"error": "Use a valid registration request."})
+            else:
+                self._reply(400, {"error": "Use a valid registration request."})
 
     def _command(self, light_id, action):
         try:
