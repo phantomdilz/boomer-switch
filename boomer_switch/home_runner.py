@@ -18,6 +18,7 @@ import uuid
 
 import aiohttp
 
+from .configuration import service_key as validate_service_key, light_metadata
 from .kasa_pilot import KasaPilotResolver
 from .lights import CommandDenied, LightService, LightState, load_allowlist
 from .pilot import CommandJournal, DuplicateCommand, runtime_lock
@@ -141,8 +142,7 @@ class WebsiteTransport:
         parsed = urlsplit(website_url)
         if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise ValueError("Configure the explicit hosted HTTPS website URL.")
-        if not isinstance(service_key, str) or len(service_key) < 32:
-            raise ValueError("Configure a private service key of at least 32 characters.")
+        validate_service_key(service_key)
         self.url, self.key, self.clock = website_url.rstrip("/"), service_key, clock
         self.session_factory = session_factory
         self.ssl = ssl.create_default_context()
@@ -208,8 +208,7 @@ class HomeRunner:
             raise ValueError("Use the journal bound to this physical lamp.")
         self.light, self.resolver, self.transport, self.journal, self.clock = light, resolver, transport, journal, clock
         self.service = LightService((light,), resolver, timeout_seconds=8)
-        if any(len(value) > 120 for value in (light.name, light.room)):
-            raise ValueError("Use guest display names of at most 120 characters.")
+        light_metadata(self.service.lights()[0])
         self.busy = asyncio.Lock()
 
     def current(self, assignment, deadline):
@@ -296,6 +295,7 @@ def load_home(path):
     selected = [item for item in load_allowlist(base / config["allowlist_file"]) if item.light_id == config["light_id"]]
     if len(selected) != 1 or selected[0].outlet_id is not None:
         raise ValueError("Select exactly one standalone lamp.")
+    light_metadata({"light_id": selected[0].light_id, "name": selected[0].name, "room": selected[0].room})
     credentials = None
     if "username" in config or "password" in config:
         if not all(isinstance(config.get(key), str) and config[key] for key in ("username", "password")):

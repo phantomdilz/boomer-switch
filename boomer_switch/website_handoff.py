@@ -10,14 +10,15 @@ import uuid
 
 from .registration import AccessDenied, _digest
 
+from .configuration import service_key as validate_service_key
+
 
 class WebsiteHandoff:
     def __init__(self, store, service_key, callback, entry=None):
         target = urlsplit(callback)
         if target.scheme != "https" or not target.netloc or target.username or target.query or target.fragment:
             raise ValueError("Configure the exact HTTPS home callback.")
-        if not isinstance(service_key, str) or len(service_key) < 32:
-            raise ValueError("Configure a private service key of at least 32 characters.")
+        validate_service_key(service_key)
         if entry is None:
             entry = callback.rsplit('/', 1)[0] + '/start'
         start = urlsplit(entry)
