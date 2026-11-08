@@ -21,7 +21,7 @@ class Element {
 }
 async function fixture(access={status:"approved",home_ready:true,home_status:"ready",lights:catalog,csrf:"synthetic"}) {
   const roots=[];
-  for(const id of ["status","details","verification","controls","connection","rooms","retry-access","entry-recovery","name","email","code","resend"]) {
+  for(const id of ["status","details","verification","controls","connection","rooms","room-navigation","room-picker","retry-access","entry-recovery","name","email","code","resend"]) {
     const element=new Element(["details","verification"].includes(id)?"form":"div");element.id=id;roots.push(element);
   }
   const all=()=>{const out=[];const walk=node=>{out.push(node);node.children.forEach(walk);};roots.forEach(walk);return out;};

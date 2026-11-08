@@ -5,6 +5,15 @@ const verification = document.querySelector("#verification");
 const controls = document.querySelector("#controls");
 const connection = document.querySelector("#connection");
 const rooms = document.querySelector("#rooms");
+const roomNavigation = document.querySelector("#room-navigation");
+const roomPicker = document.querySelector("#room-picker");
+roomPicker.addEventListener("change", () => {
+  const heading = document.getElementById(roomPicker.value);
+  if (!heading || !rooms.contains(heading)) return;
+  heading.focus({preventScroll: true});
+  heading.scrollIntoView({block: "start"});
+  roomPicker.selectedIndex = 0;
+});
 const entry = window.HouseLightsEntry;
 const retryAccess = document.querySelector("#retry-access");
 const lights = new Map();
@@ -69,6 +78,8 @@ function clearControls(message) {
   operation = null;
   controls.hidden = true;
   lights.clear(); rooms.replaceChildren(); catalogSignature = "";
+  roomPicker.replaceChildren();
+  roomNavigation.hidden = true;
   connectionMessage(message);
 }
 function catalog(result) {
@@ -90,13 +101,22 @@ function renderCatalog(items, legacy) {
   if (signature === catalogSignature) return;
   version += 1; operation = null; lights.clear(); rooms.replaceChildren();
   catalogSignature = signature; legacyCatalog = legacy;
+  const prompt = document.createElement("option");
+  prompt.value = "";
+  prompt.textContent = "Choose a room";
+  roomPicker.replaceChildren(prompt);
   const groups = new Map();
   for (const item of ordered) {
     let group = groups.get(item.room);
     if (!group) {
       group = document.createElement("section"); group.className = "room"; group.dataset.room = item.room;
       const heading = document.createElement("h2"); heading.textContent = item.room;
-      if (!groups.size) heading.id = "light-room";
+      heading.id = groups.size ? "light-room-" + groups.size : "light-room";
+      heading.tabIndex = -1;
+      const option = document.createElement("option");
+      option.value = heading.id;
+      option.textContent = item.room;
+      roomPicker.append(option);
       group.append(heading); groups.set(item.room, group); rooms.append(group);
     }
     const card = document.createElement("article"); card.className = "light"; card.dataset.lightId = item.light_id;
@@ -119,6 +139,7 @@ function renderCatalog(items, legacy) {
     lights.set(item.light_id, {...item, card, stateLine, detail, on, off, refresh,
       state: "unchecked", confirmedAt: null, needsRefresh: false, message: "Choose Refresh state, On, or Off. State is checked only when requested."});
   }
+  roomNavigation.hidden = groups.size < 2;
   syncControls();
 }
 function show(result) {
