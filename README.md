@@ -71,6 +71,10 @@ Stop the demo with Ctrl+C.
 The optional `demo` extra declares Playwright for `demos/mobile_acceptance.py`.
 That script checks the mobile page with Firefox and uses only sample devices.
 
+`demos/mobile_layout_acceptance.py` checks the hosted and local sample controls at 320 and 375 pixels, with normal and 200% text.
+It rejects overlaps, horizontal overflow, split button words, and disabled-button contrast below 4.5:1.
+It also checks registration, People, and connection alerts through isolated API fixtures and saves screenshots in `.test-runs/pj78-mobile`.
+
 For synthetic external changes, send JSON to `POST /demo/fixtures`:
 `{"light_id":"sofa-lamp","state":"on"}`.
 Use `off` for an external off state or `unavailable` for a persistent sample failure.

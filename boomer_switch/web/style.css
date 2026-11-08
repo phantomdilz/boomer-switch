@@ -35,12 +35,12 @@ h3 { margin: 0; font-size: 1.1rem; overflow-wrap: anywhere; }
 .state { flex-shrink: 0; padding: .35rem .65rem; border-radius: 1rem; font-size: .85rem; font-weight: 650; background: #eef0ed; }
 .state[data-state="on"] { color: #21512f; background: #e0f0dd; }
 .state[data-state="unavailable"] { color: #6d4219; background: #fff0d7; }
-.actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+.actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 7rem), 1fr)); gap: .75rem; }
 button {
   min-height: 3.5rem;
   min-width: 0;
   padding: .65rem .8rem;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
   border-radius: .65rem;
   border: 1px solid #b9c9be;
   color: #26372f;
@@ -54,7 +54,7 @@ button {
 button[aria-pressed="true"] { background: #29563f; border-color: #29563f; color: white; }
 button:hover:enabled { border-color: #29563f; box-shadow: inset 0 0 0 1px #29563f; }
 button:focus-visible { outline: 3px solid #b37a22; outline-offset: 3px; }
-button:disabled { cursor: wait; opacity: .65; }
+button:disabled { cursor: wait; opacity: 1; color: #425047; background: #eef0ed; border-color: #9ba99d; }
 footer { margin-top: 2rem; color: #526256; font-size: .8rem; line-height: 1.5; }
 form { display: grid; gap: .75rem; max-width: 30rem; }
 [hidden] { display: none !important; }

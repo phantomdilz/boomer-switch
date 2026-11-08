@@ -15,14 +15,39 @@ LIGHT = {"light_id": "sample-lamp", "name": "Sample lamp with a long descriptive
 
 
 def geometry(page):
-    problems = page.evaluate("""() => {
+    problems = page.evaluate(r"""() => {
       const visible = e => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden';
       const controls = [...document.querySelectorAll('button,input')].filter(visible);
       const errors = [];
+      const luminance = color => {
+        const rgb = color.match(/[\d.]+/g).slice(0, 3).map(Number).map(v => {
+          v /= 255;
+          return v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4;
+        });
+        return rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722;
+      };
       for (const [i, a] of controls.entries()) {
         const x = a.getBoundingClientRect();
         if (x.left < -1 || x.right > innerWidth + 1) errors.push('outside viewport: ' + a.outerHTML);
         if (a.tagName === 'BUTTON' && a.scrollWidth > a.clientWidth + 1) errors.push('button text overflow');
+        if (a.tagName === 'BUTTON') {
+          const walker = document.createTreeWalker(a, NodeFilter.SHOW_TEXT);
+          while (walker.nextNode()) {
+            const node = walker.currentNode;
+            for (const word of node.textContent.matchAll(/\S+/g)) {
+              const range = document.createRange();
+              range.setStart(node, word.index);
+              range.setEnd(node, word.index + word[0].length);
+              const lines = new Set([...range.getClientRects()].filter(r => r.width > 0).map(r => Math.round(r.top)));
+              if (lines.size > 1) errors.push('button word split across lines: ' + word[0]);
+            }
+          }
+          if (a.disabled) {
+            const style = getComputedStyle(a);
+            const colors = [luminance(style.color), luminance(style.backgroundColor)].sort((a,b) => b-a);
+            if (Number(style.opacity) !== 1 || (colors[0] + .05) / (colors[1] + .05) < 4.5) errors.push('disabled button contrast');
+          }
+        }
         for (const b of controls.slice(i + 1)) {
           const y = b.getBoundingClientRect();
           if (Math.min(x.right, y.right) - Math.max(x.left, y.left) > 1 &&
@@ -126,9 +151,21 @@ def run(output):
                 expect(alert).not_to_contain_text("Error:")
                 expect(alert).not_to_contain_text("Wi-Fi")
                 page.locator("#refresh-light").click()
+                expect(page.locator("#light-on")).to_be_disabled()
+                geometry(page)
+                page.screenshot(path=str(output / f"guest-controls-disabled-{width}.png"), full_page=True)
                 expect(page.locator("#light-on")).to_be_enabled(timeout=10000)
                 geometry(page)
                 page.screenshot(path=str(output / f"guest-controls-{width}.png"), full_page=True)
+                page.evaluate("document.documentElement.style.fontSize = '200%'")
+                geometry(page)
+                page.screenshot(path=str(output / f"guest-controls-large-text-{width}.png"), full_page=True)
+                page.locator("#refresh-light").click()
+                expect(page.locator("#light-on")).to_be_disabled()
+                geometry(page)
+                page.screenshot(path=str(output / f"guest-controls-large-text-disabled-{width}.png"), full_page=True)
+                expect(page.locator("#light-on")).to_be_enabled(timeout=10000)
+                page.evaluate("document.documentElement.style.fontSize = ''")
                 state["status"] = "pending"
                 page.reload()
                 expect(page.locator("#status")).to_have_text("Waiting for approval")
@@ -158,6 +195,7 @@ def run(output):
                 page.reload()
                 expect(page.locator(".light")).to_have_count(1)
                 geometry(page)
+                page.screenshot(path=str(output / f"sample-controls-{width}.png"), full_page=True)
                 page.locator('[data-action="on"]').click()
                 geometry(page)
                 page.evaluate("document.documentElement.style.fontSize = '200%'")
