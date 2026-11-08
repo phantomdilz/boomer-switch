@@ -314,3 +314,21 @@ def test_exact_poll_retry_from_another_source_retires_epoch_but_lower_poll_canno
     assert rv.machine(env(A),'/home/authorize',bound(assignment,2))['allowed']
     with pytest.raises(OperationConflict): rv.machine(env(B),'/home/poll',body)
     assert rv.machine(env(A),'/home/authorize',bound(assignment,2))['allowed'] is False
+
+
+@pytest.mark.parametrize("field", ["name", "room"])
+@pytest.mark.parametrize("value", ["First\nSecond", "First\rSecond", "First\tSecond", "First\x00Second", "x" * 121])
+def test_hosted_poll_rejects_invalid_light_metadata(house, field, value):
+    rv, store, raw, clock = house
+    with pytest.raises(ValueError):
+        poll(rv, 1, light={**LIGHT, field: value})
+    with store._transaction() as db:
+        assert db.execute("SELECT COUNT(*) FROM home_connection").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("field", ["name", "room"])
+def test_hosted_poll_accepts_display_limit(house, field):
+    rv, store, raw, clock = house
+    metadata = {**LIGHT, field: "x" * 120}
+    poll(rv, 1, light=metadata)
+    assert rv.display(raw, env()) == metadata
