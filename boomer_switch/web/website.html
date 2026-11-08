@@ -9,5 +9,6 @@
 <form id="verification" hidden><fieldset disabled><p id="code-help">The code expires after 10 minutes.</p><label for="code">Verification code</label><input id="code" aria-describedby="code-help" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required><button id="verify-code">Verify code</button><button type="button" id="resend">Send new code</button></fieldset></form>
 <p id="connection" role="status" hidden>Waiting for the home connection</p>
 <section id="controls" hidden aria-label="Light controls">
+<label id="room-navigation" hidden>Jump to room<select id="room-picker"></select></label>
 <div id="rooms"></div></section>
 <p>Use the home internet connection. This IPv4 pilot cannot distinguish home Wi-Fi, wired connections, or a home VPN.</p></main></body></html>

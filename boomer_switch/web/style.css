@@ -91,6 +91,17 @@ form p { margin: 0; }
   .person .actions { grid-template-columns: 1fr; }
 }
 
+#room-navigation { display: grid; gap: .4rem; max-width: 30rem; }
+#room-picker {
+  width: 100%;
+  min-height: 3rem;
+  padding: .5rem;
+  border: 1px solid #526256;
+  border-radius: .5rem;
+  color: inherit;
+  background: white;
+  font: inherit;
+}
 section.room {
   min-width: 0;
   margin-top: 1.5rem;
