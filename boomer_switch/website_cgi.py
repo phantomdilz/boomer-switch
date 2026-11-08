@@ -37,7 +37,8 @@ def create_application(config):
     mail = WebsiteMail(store, transport, mail_config["sender"], owner_notifications=notices)
     rendezvous = HomeRendezvous(store, config["service_key"], idle_poll_seconds=config.get("idle_poll_seconds", 15))
     return WebsiteApplication(store, mail, origin=config["origin"], mount=config["mount"],
-                              owner_identity=config["owner_identity"], grant_app=None, rendezvous=rendezvous, owner_actions=notices)
+                              owner_identity=config["owner_identity"], grant_app=None, rendezvous=rendezvous, owner_actions=notices,
+                              invitation_template=config.get("invitation_template"))
 
 
 def main():

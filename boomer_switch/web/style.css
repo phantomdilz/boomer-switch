@@ -119,3 +119,11 @@ section.room {
 .room > .light + .light { border-top: 1px solid #9ba99d; }
 .light-detail { line-height: 1.45; overflow-wrap: anywhere; }
 .state[data-state="unknown"] { color: #6d4219; background: #fff0d7; }
+.invitation-qr svg { display: block; max-width: 100%; height: auto; margin: 1.5rem auto; }
+.invitation-address { font-size: 1.3rem; font-weight: 650; overflow-wrap: anywhere; }
+#replace-warning { margin-top: 1rem; padding: 1rem; border: 2px solid #a11b1b; border-radius: .5rem; }
+#replace-warning button { width: 100%; margin-top: .75rem; }
+@media print {
+  .invitation-card { max-width: 40rem; }
+  .invitation-card .print-help { display: none; }
+}
