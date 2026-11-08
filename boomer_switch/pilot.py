@@ -67,7 +67,7 @@ class DuplicateCommand(ValueError):
 class CommandJournal:
     """Reserve operation IDs durably before a possible physical effect."""
 
-    def __init__(self, path, device_id):
+    def __init__(self, path, device_id, *, allow_fleet=False):
         self.path = Path(path)
         self.identity = hashlib.sha256(device_id.encode()).hexdigest()
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -75,6 +75,8 @@ class CommandJournal:
         try:
             with db:
                 db.execute("BEGIN IMMEDIATE")
+                if not allow_fleet and db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='fleet_targets'").fetchone():
+                    raise ValueError("Use the multi-light runner for this journal.")
                 db.execute("CREATE TABLE IF NOT EXISTS commands (id TEXT PRIMARY KEY,fingerprint TEXT NOT NULL,status TEXT NOT NULL)")
                 db.execute("CREATE TABLE IF NOT EXISTS pilot_identity (id INTEGER PRIMARY KEY CHECK(id=1),binding TEXT NOT NULL)")
                 bound = db.execute("SELECT binding FROM pilot_identity WHERE id=1").fetchone()

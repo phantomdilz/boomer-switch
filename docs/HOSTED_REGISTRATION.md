@@ -49,7 +49,8 @@ Copy the JSON example there as `config.local.passenger.json`, restrict its permi
 Keep the application root, validator, configuration, and canonical state outside the document root.
 Configure Passenger's WSGI application root, startup file, private Python executable, and the dedicated base URI.
 The base URI must equal JSON `mount`; its trusted WSGI `SCRIPT_NAME` must match exactly.
-The server must supply HTTPS scheme and the exact configured host, and enforce a 25-second total request deadline and a 4096-byte body limit.
+The server must supply HTTPS scheme and the exact configured host, and enforce a 25-second total request deadline.
+Limit request bodies to 4096 bytes, except the authenticated `/home/poll` catalog route, which permits at most 131072 bytes.
 
 Apache must overwrite the peer header on every request in this namespace:
 

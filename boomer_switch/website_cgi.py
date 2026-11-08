@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import sys
 
+from .configuration import POLL_BYTES
 from .registration import RegistrationStore
 from .home_rendezvous import HomeRendezvous
 from .website import WebsiteApplication
@@ -44,7 +45,8 @@ def main():
         config = json.loads(Path(os.environ["BOOMER_PRIVATE_CONFIG"]).read_text())
         app = create_application(config)
         length = int(os.environ.get("CONTENT_LENGTH") or 0)
-        if not 0 <= length <= 4096:
+        limit = POLL_BYTES if os.environ.get("PATH_INFO") == "/home/poll" else 4096
+        if not 0 <= length <= limit:
             raise ValueError
         environ = {key: os.environ[key] for key in ("REQUEST_METHOD", "PATH_INFO", "SCRIPT_NAME", "CONTENT_TYPE", "CONTENT_LENGTH", "REMOTE_USER", "HTTP_COOKIE", "HTTP_ORIGIN", "HTTP_X_CSRF_TOKEN", "HTTP_AUTHORIZATION", "REMOTE_ADDR") if key in os.environ}
         environ["wsgi.url_scheme"] = "https" if os.environ.get("BOOMER_HTTPS") == "1" else "http"

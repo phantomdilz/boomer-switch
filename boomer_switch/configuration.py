@@ -19,3 +19,17 @@ def light_metadata(light):
             or any(ord(char) < 32 for char in light[key]) for key in ("name", "room")):
         raise ValueError("Use guest display names of at most 120 characters without control characters.")
     return light
+
+
+CATALOG_LIMIT = 32
+POLL_BYTES = 131072
+
+
+def light_catalog(values):
+    if not isinstance(values, list) or not 1 <= len(values) <= CATALOG_LIMIT:
+        raise ValueError("Configure from 1 through 32 selected lights.")
+    for value in values:
+        light_metadata(value)
+    if len({value["light_id"] for value in values}) != len(values):
+        raise ValueError("Use unique selected light IDs.")
+    return values

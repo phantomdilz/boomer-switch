@@ -10,6 +10,7 @@ MODULE_MARKERS = {
     "test_demo.py": ("demo",),
     "test_registration.py": ("registration",),
     "test_rendezvous.py": ("registration", "pilot"),
+    "test_website_controls.py": ("registration", "pilot"),
     "test_website.py": ("registration", "people"),
     "test_mail_signing.py": ("registration",),
     "test_passenger.py": ("registration", "people", "pilot"),
@@ -19,6 +20,7 @@ MODULE_MARKERS = {
     "test_pilot.py": ("pilot",),
     "test_guest_proxy.py": ("pilot",),
     "test_hosted_tls.py": ("demo", "pilot"),
+    "test_fleet.py": ("pilot", "registration"),
     "test_home_runner.py": ("pilot",),
     "test_tooling.py": ("tooling",),
 }

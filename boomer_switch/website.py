@@ -12,6 +12,7 @@ from .people import OwnerPrincipal, PeopleApplication, owner_cookie
 from .registration import AccessDenied, InvalidInvitation, StalePerson, _digest
 from .website_mail import MailUnavailable
 from .home_rendezvous import HomeUnavailable, OperationConflict
+from .configuration import POLL_BYTES
 from .website_grants import json_object
 from .owner_notifications import OWNER_DECISION_PATH
 
@@ -100,7 +101,9 @@ class WebsiteApplication:
                 result["home_status"] = self.rendezvous.access_status(raw, environ or {})
             result["home_ready"] = result.get("home_status") == "ready"
             if result["home_ready"]:
-                result["light"] = self.rendezvous.display(raw, environ or {})
+                result["lights"] = self.rendezvous.display_lights(raw, environ or {})
+                if len(result["lights"]) == 1:
+                    result["light"] = result["lights"][0]
         if self.rendezvous is None and status == "approved" and self.handoff is not None:
             result["home_entry"] = self.handoff.entry
         return result
@@ -152,7 +155,8 @@ class WebsiteApplication:
                 return [encoded]
             if self.rendezvous is not None and path.startswith("/home/") and method == "POST":
                 length = int(environ.get("CONTENT_LENGTH") or 0)
-                if not 0 < length <= 2048 or environ.get("CONTENT_TYPE", "").split(";")[0] != "application/json":
+                limit = POLL_BYTES if path == "/home/poll" else 2048
+                if not 0 < length <= limit or environ.get("CONTENT_TYPE", "").split(";")[0] != "application/json":
                     raise ValueError
                 body = json_object(environ["wsgi.input"].read(length))
                 payload = self.rendezvous.machine(environ, path, body)
