@@ -3,9 +3,9 @@
 import hmac
 import ipaddress
 import json
-import re
 import uuid
 
+from .configuration import service_key as validate_service_key, light_metadata
 from .registration import AccessDenied, _digest
 
 
@@ -28,8 +28,7 @@ class HomeRendezvous:
     TTL = 8
 
     def __init__(self, store, service_key, *, idle_poll_seconds=15):
-        if not isinstance(service_key, str) or len(service_key) < 32:
-            raise ValueError("Configure a private home service key.")
+        validate_service_key(service_key)
         if type(idle_poll_seconds) is not int or not 15 <= idle_poll_seconds <= 60:
             raise ValueError("Set the idle poll interval from 15 through 60 seconds.")
         self.store, self.key, self.idle = store, service_key, idle_poll_seconds
@@ -239,10 +238,7 @@ class HomeRendezvous:
     def _poll(self, db, peer, body):
         now = self.store.clock()
         light = body['light']
-        if not isinstance(light,dict) or set(light)!={'light_id','name','room'} or not isinstance(light['light_id'],str) or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,63}',light['light_id']):
-            raise ValueError
-        if any(not isinstance(light[key],str) or not 1<=len(light[key].strip())<=120 or any(ord(char)<32 for char in light[key]) for key in ('name','room')):
-            raise ValueError
+        light_metadata(light)
         self._compact(db)
         current = db.execute('SELECT * FROM home_connection WHERE id=1').fetchone()
         if current and (current['agent'] != body['agent_id'] or body['sequence'] < current['sequence']):

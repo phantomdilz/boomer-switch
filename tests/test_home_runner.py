@@ -334,3 +334,67 @@ def test_read_receipts_compact_and_expired_unacked_read_does_not_block_recovery(
         with sqlite3.connect(home.journal.path) as db:
             assert db.execute("SELECT body FROM outbound_receipts WHERE operation_id=?", (changed["operation_id"],)).fetchone()[0] == "{}"
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("value", [None, "short", "REPLACE_WITH_PRIVATE_RANDOM_SERVICE_KEY"])
+def test_published_service_key_is_rejected_at_both_ends(value):
+    from boomer_switch.home_rendezvous import HomeRendezvous
+    from boomer_switch.website_grants import WebsiteGrantApplication, HTTPSGrantClient
+    from boomer_switch.website_handoff import WebsiteHandoff
+
+    for create in (lambda: WebsiteTransport(SITE, value),
+                   lambda: HomeRendezvous(None, value),
+                   lambda: WebsiteGrantApplication(None, value),
+                   lambda: HTTPSGrantClient(SITE, value),
+                   lambda: WebsiteHandoff(None, value, SITE)):
+        with pytest.raises(ValueError, match="private.*service key"):
+            create()
+
+
+@pytest.mark.parametrize("field", ["name", "room"])
+@pytest.mark.parametrize("value", ["First\nSecond", "First\rSecond", "First\tSecond", "First\x00Second", "x" * 121])
+def test_home_metadata_matches_hosted_rejection(tmp_path, field, value):
+    from dataclasses import replace
+    from boomer_switch.configuration import light_metadata
+
+    light = replace(LIGHT, **{field: value})
+    journal = OutboundJournal(tmp_path / "operations.sqlite", light.device_id, SITE)
+    provider, calls = resolver(Device())
+    with pytest.raises(ValueError):
+        HomeRunner(light, provider, Hosted(), journal)
+    with pytest.raises(ValueError):
+        light_metadata({"light_id": light.light_id, "name": light.name, "room": light.room})
+    assert calls == []
+
+
+@pytest.mark.parametrize("field", ["name", "room"])
+def test_home_accepts_display_limit_and_preserves_service_key(tmp_path, field):
+    from dataclasses import replace
+    from boomer_switch.configuration import light_metadata
+
+    light = replace(LIGHT, **{field: "x" * 120})
+    journal = OutboundJournal(tmp_path / "operations.sqlite", light.device_id, SITE)
+    provider, _ = resolver(Device())
+    home = HomeRunner(light, provider, Hosted(), journal)
+    assert home.transport.key == KEY
+    assert light_metadata({"light_id": light.light_id, "name": light.name, "room": light.room})[field] == "x" * 120
+
+
+@pytest.mark.parametrize("field", ["name", "room"])
+def test_invalid_config_metadata_does_not_bind_a_journal(tmp_path, monkeypatch, field):
+    from dataclasses import asdict
+    from boomer_switch.home_runner import load_home
+
+    (tmp_path / "allowlist.json").write_text(json.dumps({"lights": [{**asdict(LIGHT), field: "First\nSecond"}]}))
+    config = {"allowlist_file": "allowlist.json", "light_id": LIGHT.light_id,
+              "device_host": "synthetic-host", "website_url": SITE, "website_key": KEY,
+              "operation_db": "operations.sqlite"}
+    path = tmp_path / "home.json"
+    path.write_text(json.dumps(config))
+    def forbidden(*args, **kwargs):
+        pytest.fail("Invalid metadata reached the provider or journal constructor.")
+    monkeypatch.setattr("boomer_switch.home_runner.KasaPilotResolver", forbidden)
+    monkeypatch.setattr("boomer_switch.home_runner.OutboundJournal", forbidden)
+    with pytest.raises(ValueError):
+        load_home(path)
+    assert not (tmp_path / "operations.sqlite").exists()

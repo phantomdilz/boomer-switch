@@ -12,6 +12,8 @@ import time
 from urllib.parse import urlsplit
 import uuid
 
+from .configuration import service_key as validate_service_key
+
 
 class PermissionUnavailable(ValueError):
     """Current website permission cannot be confirmed."""
@@ -80,8 +82,7 @@ class WebsiteGrantApplication:
     """Expose only current permission to the authenticated home service over HTTPS."""
 
     def __init__(self, grants, service_key):
-        if not isinstance(service_key, str) or len(service_key) < 32:
-            raise ValueError("Configure a private service key of at least 32 characters.")
+        validate_service_key(service_key)
         self.grants, self.service_key = grants, service_key
 
     def __call__(self, environ, start_response):
@@ -134,8 +135,7 @@ class HTTPSGrantClient:
         parsed = urlsplit(url)
         if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise ValueError("Configure an explicit HTTPS permission endpoint.")
-        if not isinstance(service_key, str) or len(service_key) < 32:
-            raise ValueError("Configure a private service key of at least 32 characters.")
+        validate_service_key(service_key)
         self.url, self.service_key, self.clock = url, service_key, clock
         self.session_factory = session_factory or aiohttp.ClientSession
         self.timeout = aiohttp.ClientTimeout(total=2, connect=1, sock_read=1)
