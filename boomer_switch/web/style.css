@@ -77,6 +77,7 @@ form, .light, .person { min-width: 0; }
 form p { margin: 0; }
 .person { margin-bottom: 1rem; }
 .person label input { display: block; margin-top: .5rem; }
+.people-page input[type="date"] { padding-inline: .15rem; font-weight: 400; }
 #refresh-light, .refresh-light { width: 100%; margin-top: .75rem; padding-inline: .5rem; }
 #connection[data-level="error"] {
   color: #a11b1b;
@@ -89,6 +90,8 @@ form p { margin: 0; }
 }
 @media (max-width: 24rem) {
   .person .actions { grid-template-columns: 1fr; }
+  .people-page { padding-inline: .5rem; }
+  .people-page .person { padding: .5rem; }
 }
 
 #room-navigation { display: grid; gap: .4rem; max-width: 30rem; }
