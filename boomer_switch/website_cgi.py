@@ -11,6 +11,7 @@ from .home_rendezvous import HomeRendezvous
 from .website import WebsiteApplication
 from .website_mail import WebsiteMail, SMTPTransport, SendmailTransport
 from .owner_notifications import OwnerNotifications
+from .mail_signing import configured_signer
 
 
 def create_application(config):
@@ -19,10 +20,11 @@ def create_application(config):
         raise ValueError("Configure an absolute private state directory.")
     store = RegistrationStore(state, mode="production")
     mail_config = config["mail"]
+    signer = configured_signer(mail_config, state)
     if mail_config["transport"] == "smtp":
-        transport = SMTPTransport(mail_config["host"], mail_config["port"], mail_config.get("username"), mail_config.get("password"), implicit_tls=mail_config.get("implicit_tls", False))
+        transport = SMTPTransport(mail_config["host"], mail_config["port"], mail_config.get("username"), mail_config.get("password"), implicit_tls=mail_config.get("implicit_tls", False), signer=signer)
     elif mail_config["transport"] == "sendmail":
-        transport = SendmailTransport(mail_config["executable"])
+        transport = SendmailTransport(mail_config["executable"], signer=signer)
     else:
         raise ValueError("Configure the website mail transport.")
     owner = config.get('owner_notifications')
