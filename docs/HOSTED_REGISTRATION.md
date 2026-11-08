@@ -41,6 +41,11 @@ Use Python 3.11 or later with SQLite and SSL.
 Install the `website` extra in a private virtual environment.
 Put `hosting/index.php` only inside the dedicated namespace.
 Route every path within that namespace to that bridge.
+
+Publish `entry.js` with `website.js`, `style.css`, and the updated guest page in the same approved release.
+If Apache serves public assets directly, include the component's `entry.js` path in its GET/HEAD allowlist.
+Keep the existing same-origin script policy. The bootstrap needs no inline-script exception.
+Do not update an already staged release in place. Publish both pages, scripts, and the public asset rule together on the next approved release.
 PHP 8.2 must support `proc_open` with an array command.
 
 Each request starts one private Python CGI process. No persistent Python listener is required.
@@ -191,7 +196,16 @@ The old home-entry and callback modules remain historical isolated components, n
 
 The existing card URLs continue to open this website namespace.
 Use the private master and an operator-verified JSON record with `verified: true`, `invite_url`, and `short_url`.
-Both URLs use HTTPS and the same namespace, with `/invite/OPAQUE_TOKEN` and `/s/ALIAS` paths.
+Both URLs use HTTPS and the same namespace: `/guest#invitation=OPAQUE_TOKEN` and `/s/ALIAS`.
+The invitation fragment stays in the browser and never enters a new card's HTTP request target.
+The generator also accepts a verified legacy `/invite/OPAQUE_TOKEN` record and normalizes its QR to the fragment form.
+Legacy printed full links and valid short aliases still redirect to the same guest page.
+They do not create sessions, send codes, or replace cookies during a preview GET.
+The page first restores its Strict cookie through a same-origin access check, then accepts the invitation through a protected POST.
+It retains a pending invitation until the server acknowledges it and never retries mail actions automatically.
+The clean guest bookmark contains no invitation. Responses use `Referrer-Policy: no-referrer`.
+Keep request bodies out of logs and redact legacy invitation paths at the host until old cards are retired.
+Application handlers do not log invitation values. Existing staged releases stay unchanged until the next separately approved deployment.
 The generator does not create live links or make network requests:
 
 ```text

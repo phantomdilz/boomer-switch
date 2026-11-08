@@ -268,7 +268,7 @@ def run() -> None:
                 canvas.showPage()
             canvas.save()
             invitation = store.invitation()
-            invite_url = mount + "/invite/" + invitation["token"]
+            invite_url = mount + "/guest#invitation=" + invitation["token"]
             short_url = mount + "/s/" + invitation["alias"]
             render_hosted_card(template, output, {"verified": True, "invite_url": invite_url, "short_url": short_url})
             raster = subprocess.run(["pdftoppm", "-png", "-r", "144", str(output), str(root / "page")], capture_output=True, timeout=30, check=False)

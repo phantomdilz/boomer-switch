@@ -232,9 +232,14 @@ def http(server, method, path, payload=None, cookie=None):
 
 def invite_browser(server):
     status, headers, _ = http(server, "GET", "/invite/" + server.registration.invitation()["token"])
-    assert status == 302 and headers["Location"] == "/guest"
+    assert status == 302 and headers["Location"].startswith("/guest#invitation=")
+    assert "Set-Cookie" not in headers
+    _, headers, _ = http(server, "GET", "/api/access")
     parsed = SimpleCookie()
     parsed.load(headers["Set-Cookie"])
+    raw = parsed["bs_session"].value
+    _, accepted, _ = http(server, "POST", "/api/invite", {"invitation": server.registration.invitation()["token"]}, raw)
+    parsed.load(accepted.get("Set-Cookie", ""))
     return parsed["bs_session"].value
 
 
@@ -276,15 +281,17 @@ def test_invalid_invite_preserves_approved_bookmark_and_public_routes_do_not_exp
         server.registration.operator("approve", EMAIL)
         count = len(server.registration.mailbox(EMAIL)["messages"])
         status, headers, body = http(server, "GET", "/invite/invalid", cookie=cookie)
-        assert status == 403
+        assert status == 302 and headers["Location"].startswith("/guest#invitation=")
         assert headers["Referrer-Policy"] == "no-referrer"
         assert "Set-Cookie" not in headers
+        assert http(server, "POST", "/api/invite", {"invitation": "invalid"}, cookie)[0] == 403
         assert http(server, "POST", "/api/register", {"name": "Sample guest", "email": EMAIL}, cookie)[0] == 403
         assert len(server.registration.mailbox(EMAIL)["messages"]) == count
         assert http(server, "GET", "/api/lights", cookie=cookie)[0] == 200
         valid = server.registration.invitation()["token"]
         _, valid_headers, _ = http(server, "GET", "/invite/" + valid, cookie=cookie)
-        assert SimpleCookie(valid_headers["Set-Cookie"])["bs_session"].value == cookie
+        assert "Set-Cookie" not in valid_headers
+        assert http(server, "POST", "/api/invite", {"invitation": valid}, cookie)[0] == 200
         assert server.registration.status(cookie) == "approved"
         for route in ("/demo/mail", "/demo/approve", "/api/mail", "/registration.sqlite"):
             assert http(server, "GET", route)[0] == 404
@@ -302,7 +309,7 @@ def test_actual_operator_card_and_mail_cli_are_local_only(tmp_path):
     assert Path(result["printable_card"]).parent == tmp_path
     markup = Path(result["printable_card"]).read_text(encoding="utf-8")
     assert "<svg" in markup and result["short_url"] in markup
-    assert "/invite/" in result["invite_url"]
+    assert "/guest#invitation=" in result["invite_url"]
     assert re.fullmatch(r"[a-z0-9]+", result["short_url"].rsplit("/", 1)[1])
     mail = subprocess.run(base + ["mail", "--email", EMAIL], cwd=root,
                           capture_output=True, text=True, timeout=10)
@@ -320,6 +327,8 @@ def test_invalid_invite_invalidates_unverified_recovery_without_mail(tmp_path):
         server.registration.start(browser, "Sample guest", EMAIL)
         before = len(server.registration.mailbox(EMAIL)["messages"])
         status, headers, _ = http(server, "GET", "/invite/invalid", cookie=browser)
+        assert status == 302 and "Set-Cookie" not in headers
+        status, headers, _ = http(server, "POST", "/api/invite", {"invitation": "invalid"}, browser)
         assert status == 403 and "Max-Age=0" in headers["Set-Cookie"]
         assert http(server, "POST", "/api/register", {"name": "Sample guest", "email": EMAIL}, browser)[0] == 403
         assert len(server.registration.mailbox(EMAIL)["messages"]) == before

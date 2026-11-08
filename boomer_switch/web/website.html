@@ -1,10 +1,12 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>House Lights access</title><link rel="stylesheet" href="style.css"><script src="website.js" defer></script></head>
+<title>House Lights access</title><link rel="stylesheet" href="style.css"><script src="entry.js" defer></script><script src="website.js" defer></script></head>
 <body><main><h1>House Lights</h1><p id="status" role="status">Checking access</p>
-<form id="details" hidden><label for="name">Name</label><input id="name" autocomplete="name" maxlength="80" required>
-<label for="email">Email</label><input id="email" type="email" autocomplete="email" maxlength="254" required><button>Send code</button></form>
-<form id="verification" hidden><label for="code">Verification code</label><input id="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required><button>Verify code</button><button type="button" id="resend">Send new code</button></form>
+<button id="retry-access" type="button" hidden>Try access again</button>
+<p id="entry-recovery" hidden>Keep this page open. If you reload, reopen the invitation.</p>
+<form id="details" hidden><fieldset disabled><label for="name">Name</label><input id="name" autocomplete="name" maxlength="80" required>
+<label for="email">Email</label><input id="email" type="email" autocomplete="email" maxlength="254" required><button id="send-code">Send code</button></fieldset></form>
+<form id="verification" hidden><fieldset disabled><label for="code">Verification code</label><input id="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required><button id="verify-code">Verify code</button><button type="button" id="resend">Send new code</button></fieldset></form>
 <p id="connection" role="status" hidden>Waiting for the home connection</p>
 <section id="controls" hidden aria-label="Light controls">
 <div id="rooms"><article class="light" id="light-card"><h2 id="light-room"></h2><h3 id="light-name"></h3>

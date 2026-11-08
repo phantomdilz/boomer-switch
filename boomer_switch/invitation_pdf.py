@@ -3,8 +3,9 @@
 from io import BytesIO
 import os
 from pathlib import Path
+import re
 import tempfile
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 
 def protect_template(template: Path, *outputs: Path):
@@ -24,14 +25,19 @@ def render_invitation_pdf(template: Path, output: Path, invite_url: str, short_u
 
     template, output = Path(template), Path(output)
     protect_template(template, output)
-    for address in (invite_url, short_url):
+    for index, address in enumerate((invite_url, short_url)):
         if not isinstance(address, str) or not address.isascii() or any(ord(char) < 33 or ord(char) > 126 for char in address):
             raise ValueError("Use a printable ASCII invitation address.")
         parsed = urlsplit(address)
         if production and (parsed.scheme != "https" or parsed.query):
             raise ValueError("Use a verified HTTPS production invitation address.")
-        if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
+        if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username is not None or parsed.password is not None:
             raise ValueError("Use an explicit invitation address without credentials.")
+        if parsed.fragment:
+            fragment = parse_qsl(parsed.fragment, strict_parsing=True, keep_blank_values=True)
+            if (index != 0 or not parsed.path.endswith("/guest") or len(fragment) != 1 or fragment[0][0] != "invitation"
+                    or not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", fragment[0][1])):
+                raise ValueError("Use one browser-only invitation fragment.")
     if template.stat().st_size > 20 * 1024 * 1024:
         raise ValueError("Use a private template smaller than 20 MiB.")
     reader = PdfReader(BytesIO(template.read_bytes()))
