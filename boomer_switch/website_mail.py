@@ -56,7 +56,7 @@ class WebsiteMail:
                 message["Message-ID"] = f"<house-lights-{row['id']}.{self.store._setting(db, 'mail_identity')}@localhost>"
                 if row["kind"] == "code":
                     message["Subject"] = "House Lights verification code"
-                    message.set_content(f"Your verification code is {row['code']}. It expires in 5 minutes.\n")
+                    message.set_content(f"Your verification code is {row['code']}. It expires in {self.store.CODE_SECONDS // 60} minutes.\n")
                 else:
                     message["Subject"] = "House Lights access request"
                     message.set_content(f"A verified guest requests access. Open the private People page.\nName: {row['name']}\nEmail: {row['email']}\n")

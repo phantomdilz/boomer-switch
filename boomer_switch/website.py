@@ -94,7 +94,9 @@ class WebsiteApplication:
         status = self.store.status(raw)
         result = {"status": status, "csrf": self._csrf(raw)}
         if self.rendezvous is not None:
-            result["home_ready"] = self.rendezvous.access(raw, environ or {}) if status == "approved" else False
+            if status == "approved":
+                result["home_status"] = self.rendezvous.access_status(raw, environ or {})
+            result["home_ready"] = result.get("home_status") == "ready"
             if result["home_ready"]:
                 result["light"] = self.rendezvous.display(raw, environ or {})
         if self.rendezvous is None and status == "approved" and self.handoff is not None:
