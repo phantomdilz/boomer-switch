@@ -70,6 +70,13 @@ def capture_date(page, field, output, label, width, scale):
     return measurements
 
 
+def submit_change(page, control):
+    with page.expect_response(lambda response: response.url == ORIGIN + '/api/people'
+                              and response.request.method == 'POST') as accepted:
+        control.click()
+    assert accepted.value.status == 200, 'The owner change must succeed before its stored state is checked.'
+
+
 def run(output):
     from playwright.sync_api import expect, sync_playwright
 
@@ -92,7 +99,7 @@ def run(output):
                     expect(page.locator('#people-status')).to_have_text('People ready.')
                     page.evaluate('scale => document.documentElement.style.fontSize=scale+"%"', scale)
                     page.locator('#add-email').fill(ADDED)
-                    page.locator('#add-person').click()
+                    submit_change(page, page.locator('#add-person'))
                     expect(page.locator('[data-email="' + ADDED + '"]')).to_be_visible()
                     expected_expiry = page.evaluate('new Date(2032,0,1).getTime()/1000')
                     fields = []
@@ -104,13 +111,13 @@ def run(output):
                         date.fill('2031-12-31')
                         expect(date).to_have_value('2031-12-31')
                         filled = capture_date(page, date, output, label + '-filled', width, scale)
-                        row.locator('[data-action="save-expiry"]').click()
+                        submit_change(page, row.locator('[data-action="save-expiry"]'))
                         expect(page.locator('#people-status')).to_have_text('People updated.')
                         expect(date).to_have_value('2031-12-31')
                         current = next(p for p in fixture.store.people() if p['email'] == email)
                         assert current['expires'] == expected_expiry, 'The last day must remain inclusive in local time.'
                         capture_date(page, date, output, label + '-saved', width, scale)
-                        row.locator('[data-action="clear-expiry"]').click()
+                        submit_change(page, row.locator('[data-action="clear-expiry"]'))
                         expect(date).to_have_value('')
                         current = next(p for p in fixture.store.people() if p['email'] == email)
                         assert current['expires'] is None
