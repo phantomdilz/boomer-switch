@@ -20,15 +20,22 @@ let operation = null;
 let version = 0;
 let lastRead = 0;
 let lastAccess = 0;
-const fragment = new URLSearchParams(location.hash.slice(1));
-if (fragment.has("invitation")) sessionStorage.setItem("invitation", fragment.get("invitation"));
-if (location.hash) history.replaceState(null, "", location.pathname);
+const entry = window.HouseLightsEntry;
+const retryAccess = document.querySelector("#retry-access");
+function enableForms() {
+  document.querySelectorAll("form fieldset").forEach(fieldset => fieldset.disabled = busy || !entry.canSubmit);
+  document.querySelector("#entry-recovery").hidden = !entry.recoveryHint;
+}
 async function request(path, body) {
   const response = await fetch(path, {method: body ? "POST" : "GET", cache: "no-store",
     headers: body ? {"Content-Type": "application/json", "X-CSRF-Token": csrf} : {},
     body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(10000)});
   const result = await response.json();
-  if (!response.ok) throw new Error(result.error || "Access unavailable.");
+  if (!response.ok) {
+    const error = new Error(result.error || "Access unavailable.");
+    error.status = response.status; error.code = result.code;
+    throw error;
+  }
   if (result.csrf) csrf = result.csrf;
   return result;
 }
@@ -58,15 +65,19 @@ function show(result) {
   }
   refreshButton.disabled = !homeReady || operation !== null;
   statusLine.textContent = {anonymous: "Open an invitation, or verify an approved email again.", invited: "Enter your name and email.", verify: "Enter the code from your email.", pending: "Waiting for approval", approved: "Access approved", denied: "Access unavailable. Contact the owner."}[result.status] || "Access unavailable.";
+  if (result.status === "invalid_invitation") statusLine.textContent = "Invitation unavailable. Open a current invitation.";
   if (!homeReady) clearControls("Use home internet and wait for its connection. This can take up to 60 seconds.");
 }
 async function submit(path, body) {
-  if (busy) return;
+  if (busy || !entry.canSubmit) return;
   version += 1; busy = true;
-  document.querySelectorAll("form button").forEach(button => button.disabled = true);
+  enableForms();
   try { show(await request(path, body)); }
-  catch (error) { statusLine.textContent = error.message; }
-  finally { busy = false; document.querySelectorAll("form button").forEach(button => button.disabled = false); }
+  catch (error) {
+    statusLine.textContent = error.message;
+    if (!error.status || error.status >= 500) { entry.invalidate(); retryAccess.hidden = false; }
+  }
+  finally { busy = false; enableForms(); }
 }
 details.addEventListener("submit", event => {event.preventDefault(); submit("api/register", {name: document.querySelector("#name").value, email: document.querySelector("#email").value});});
 verification.addEventListener("submit", event => {event.preventDefault(); submit("api/verify", {code: document.querySelector("#code").value});});
@@ -122,21 +133,21 @@ async function refresh() {
       return;
     }
     lastAccess = Date.now();
-    let result = await request("api/access");
-    const invitation = sessionStorage.getItem("invitation");
-    if (invitation) {
-      sessionStorage.removeItem("invitation");
-      result = await request("api/invite", {invitation});
-    }
+    const result = await entry.bootstrap(request, "api/access", "api/invite");
     if (started !== version) return;
     show(result);
+    retryAccess.hidden = true;
     if (operation) await checkOperation();
     else if (homeReady && Date.now() - lastRead >= 5000) await startOperation("read");
   } catch {
+    if (started !== version) return;
+    entry.invalidate();
+    retryAccess.hidden = false;
+    statusLine.textContent = "Access unavailable. The page will check again.";
     homeReady = false;
     connection.hidden = false;
     clearControls("Home access is unavailable. This page will check again.");
-  } finally { checking = false; }
+  } finally { checking = false; enableForms(); }
 }
 document.addEventListener("visibilitychange", () => {
   version += 1;
@@ -145,4 +156,7 @@ document.addEventListener("visibilitychange", () => {
   lastAccess = 0;
   refresh();
 });
+retryAccess.addEventListener("click", () => { lastAccess = 0; refresh(); });
+window.addEventListener("house-lights-entry", () => { version += 1; lastAccess = 0; enableForms(); refresh(); });
 refresh(); setInterval(refresh, 1000);
+enableForms();

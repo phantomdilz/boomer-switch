@@ -60,7 +60,7 @@ def run(template: Path) -> None:
             STEP = "fill private card"
             card = command(*operator, "card", "--base-url", guest_url, "--pdf-template", str(template))
             invite_url, short_url = card["invite_url"], card["short_url"]
-            assert invite_url.startswith(guest_url + "/invite/")
+            assert invite_url.startswith(guest_url + "/guest#invitation=")
             assert short_url.startswith(guest_url + "/s/")
             pdf = Path(card["printable_pdf"]).resolve()
             assert pdf.is_relative_to(state.resolve())

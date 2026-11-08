@@ -242,3 +242,34 @@ def test_card_cli_does_not_overwrite_verified_url_record(tmp_path):
     result = subprocess.run([sys.executable,'-m','boomer_switch.website_card','--verified-urls',str(record),
                              '--template',str(master),'--output',str(record)], capture_output=True, timeout=10)
     assert result.returncode != 0 and checksum(record) == before
+
+
+@pytest.mark.parametrize('path', ['/invite/'+'x'*43, '/guest#invitation='+'x'*43])
+def test_hosted_card_normalizes_legacy_and_new_records_to_browser_only_qr(monkeypatch, tmp_path, path):
+    import boomer_switch.website_card as card
+    captured = []
+    monkeypatch.setattr(card, 'render_invitation_pdf', lambda *args, **kwargs: captured.append((args, kwargs)))
+    card.render_hosted_card(tmp_path/'master.pdf', tmp_path/'output.pdf',
+        {'verified':True, 'invite_url':'https://site.invalid/lights'+path, 'short_url':'https://site.invalid/lights/s/fourwords'})
+    assert captured[0][0][2] == 'https://site.invalid/lights/guest#invitation='+'x'*43
+    assert captured[0][1] == {'production':True}
+
+
+@pytest.mark.parametrize('invite', [
+    'https://site.invalid/lights/guest#other='+'x'*43,
+    'https://site.invalid/lights/guest#invitation=short',
+    'https://site.invalid/lights/guest#invitation='+'x'*43+'&other=value',
+    'https://site.invalid/lights/guest#invitation='+'x'*43+'&invitation='+'x'*43,
+    'https://user@site.invalid/lights/guest#invitation='+'x'*43,
+    'https://:secret@site.invalid/lights/guest#invitation='+'x'*43,
+    'http://site.invalid/lights/guest#invitation='+'x'*43,
+    'https://site.invalid:0/lights/guest#invitation='+'x'*43,
+    'https://site.invalid/lights/../guest#invitation='+'x'*43,
+    'https://other.invalid/lights/guest#invitation='+'x'*43,
+])
+def test_hosted_card_rejects_non_invitation_fragments_and_invalid_origins(tmp_path, invite):
+    from boomer_switch.website_card import render_hosted_card
+    with pytest.raises(ValueError):
+        render_hosted_card(tmp_path/'not-read.pdf', tmp_path/'not-written.pdf',
+            {'verified':True,'invite_url':invite,'short_url':'https://site.invalid/lights/s/fourwords'})
+    assert not (tmp_path/'not-written.pdf').exists()
