@@ -87,6 +87,16 @@ def test_key_validation_and_errors_do_not_disclose_key_or_path(signing, tmp_path
     assert b'DKIM-Signature:' in message_bytes(message(), signer)
 
 
+def test_weak_signing_key_is_rejected(tmp_path):
+    path = tmp_path / 'weak.pem'
+    key = rsa.generate_private_key(public_exponent=65537, key_size=1024)
+    path.write_bytes(key.private_bytes(serialization.Encoding.PEM,
+        serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption()))
+    path.chmod(0o600)
+    with pytest.raises(ValueError, match='protected DKIM RSA key'):
+        DKIMSigner(domain='example.invalid', selector='house', private_key_path=path)
+
+
 def test_configured_signer_rejects_domain_mismatch_and_nonprivate_path(signing, tmp_path):
     _, _, path = signing
     config = {'sender':'sender@example.invalid', 'dkim':{'domain':'example.invalid',
@@ -99,3 +109,22 @@ def test_configured_signer_rejects_domain_mismatch_and_nonprivate_path(signing, 
     with pytest.raises(ValueError, match='private state'):
         configured_signer(config, tmp_path / 'other')
     assert configured_signer({'sender':'sender@example.invalid'}, tmp_path) is None
+
+
+def test_production_factory_wires_signer_and_rejects_mismatch(signing, tmp_path, monkeypatch):
+    from pathlib import Path
+    from boomer_switch.website_cgi import create_application
+    _, dns, path = signing
+    config = {'state_directory':str(tmp_path), 'origin':'https://site.invalid', 'mount':'/lights',
+        'owner_identity':'owner', 'service_key':'k'*40,
+        'mail':{'transport':'sendmail','executable':str(Path('sendmail').resolve()),
+        'sender':'sender@example.invalid', 'dkim':{'domain':'example.invalid',
+        'selector':'house','private_key_path':str(path)}}}
+    captured = []
+    monkeypatch.setattr('boomer_switch.website_mail.subprocess.run', lambda *a, **kw: captured.append(kw['input']))
+    app = create_application(config)
+    app.mail.transport.send(message())
+    assert dkim.verify(captured[0], dnsfunc=dns)
+    config['mail']['sender'] = 'sender@other.invalid'
+    with pytest.raises(ValueError, match='match the sender domain'):
+        create_application(config)
