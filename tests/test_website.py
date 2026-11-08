@@ -60,6 +60,24 @@ def guest(hosted):
     return cookie, csrf
 
 
+def test_definite_signing_failure_retains_code_for_corrected_transport(hosted):
+    from boomer_switch.mail_signing import MessagePreparationError
+    app, store, transport = hosted
+    cookie, csrf = guest(hosted)
+    def refuse(message):
+        raise MessagePreparationError('The verification message could not be prepared.')
+    original = transport.send
+    transport.send = refuse
+    assert invoke(app, '/api/register', 'POST', {'name':'Guest','email':'guest@example.invalid'}, cookie, csrf)[0] == 503
+    assert not transport.messages
+    with store._transaction() as db:
+        assert db.execute('SELECT COUNT(*) FROM mail_delivery').fetchone()[0] == 0
+        assert db.execute('SELECT code FROM mailbox').fetchone()[0] is not None
+    transport.send = original
+    assert app.mail.deliver() == 1
+    assert len(transport.messages) == 1
+
+
 def test_invitation_preview_is_stateless_and_bootstrap_acceptance_is_idempotent(hosted):
     app, store, transport = hosted
     token = store.invitation()['token']
@@ -201,8 +219,9 @@ def test_smtp_uses_certificate_verified_tls_before_login_and_closes_on_send(monk
             calls.append('tls')
         def login(self, username, password):
             calls.append('login')
-        def send_message(self, message, **envelope):
-            assert envelope == {"from_addr": "sender@example.invalid", "to_addrs": ["guest@example.invalid"]}
+        def sendmail(self, sender, recipients, message):
+            assert sender == "sender@example.invalid" and recipients == ["guest@example.invalid"]
+            assert isinstance(message, bytes) and b'\r\n' in message
             calls.append('send')
         def close(self):
             calls.append('close')
