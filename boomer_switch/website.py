@@ -15,6 +15,10 @@ from .home_rendezvous import HomeUnavailable, OperationConflict
 from .website_grants import json_object
 
 
+OWNER_PATHS = ("/people", "/people.js", "/api/people")
+REGISTRATION_MAIL_PATHS = ("/api/register", "/api/resend", "/api/verify")
+
+
 class WebsiteApplication:
     """Keep public registration separate from current server-authenticated People."""
 
@@ -34,7 +38,10 @@ class WebsiteApplication:
             db.execute("CREATE TABLE IF NOT EXISTS website_owners (id TEXT PRIMARY KEY, csrf TEXT NOT NULL, expires REAL NOT NULL)")
 
     def _owner(self, environ, headers):
-        if environ.get("REMOTE_USER") != self.owner_identity:
+        def current():
+            resolver = environ.get("boomer.resolve_identity")
+            return resolver() if callable(resolver) else environ.get("REMOTE_USER")
+        if current() != self.owner_identity:
             raise AccessDenied("Sign in as the owner to open People.")
         raw = owner_cookie(environ)
         with self.store._transaction() as db:
@@ -48,7 +55,7 @@ class WebsiteApplication:
                 csrf = row["csrf"]
         principal = OwnerPrincipal(self.owner_identity, _digest(raw), csrf)
         def resolve():
-            if environ.get("REMOTE_USER") != self.owner_identity:
+            if current() != self.owner_identity:
                 return None
             with self.store._transaction() as db:
                 return principal if db.execute("SELECT 1 FROM website_owners WHERE id=? AND expires>?", (principal.session_id, self.store.clock())).fetchone() else None
@@ -115,7 +122,7 @@ class WebsiteApplication:
         try:
             if environ.get("wsgi.url_scheme") != "https":
                 raise AccessDenied("Use HTTPS to open this page.")
-            if path in ("/people", "/people.js", "/api/people"):
+            if path in OWNER_PATHS:
                 if method == "POST" and environ.get("HTTP_ORIGIN") != self.origin:
                     raise AccessDenied("Open the private People page.")
                 self._owner(environ, headers)
@@ -186,7 +193,7 @@ class WebsiteApplication:
                 if set(body) != {"challenge", "state"}:
                     raise ValueError
                 payload = self.handoff.issue(raw, body["challenge"], body["state"])
-            elif method == "POST" and path in ("/api/register", "/api/resend", "/api/verify"):
+            elif method == "POST" and path in REGISTRATION_MAIL_PATHS:
                 body = self._body(environ, raw)
                 if path == "/api/register" and set(body) == {"name", "email"}:
                     self.store.start(raw, body["name"], body["email"])
