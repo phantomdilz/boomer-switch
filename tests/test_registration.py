@@ -122,7 +122,7 @@ def test_resends_have_cooldown_total_limit_and_old_codes_expire(tmp_path):
     with pytest.raises(AccessDenied):
         store.resend(browser)
     assert len(store.mailbox(EMAIL)["messages"]) == 3
-    now[0] += 301
+    now[0] += 601
     with pytest.raises(AccessDenied):
         store.verify(browser, code(store))
 
@@ -353,3 +353,19 @@ def test_global_send_cap_survives_restart_rotation_and_distinct_addresses(tmp_pa
     now[0] += store.WINDOW_SECONDS
     store.start(browser, "Sample guest", "extra@example.invalid")
     assert len(store.mailbox("extra@example.invalid")["messages"]) == 1
+
+
+@pytest.mark.parametrize("elapsed, accepted", [(301, True), (599, True), (600, False), (601, False)])
+def test_verification_code_has_exact_ten_minute_lifetime(tmp_path, elapsed, accepted):
+    now = [1000.0]
+    store = RegistrationStore(tmp_path, clock=lambda: now[0])
+    browser = store.browser(store.invitation()["token"])
+    store.start(browser, "Sample guest", EMAIL)
+    current = code(store)
+    now[0] += elapsed
+    if accepted:
+        store.verify(browser, current)
+        assert store.status(browser) == "pending"
+    else:
+        with pytest.raises(AccessDenied, match="Request a new verification code"):
+            store.verify(browser, current)

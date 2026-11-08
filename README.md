@@ -71,6 +71,10 @@ Stop the demo with Ctrl+C.
 The optional `demo` extra declares Playwright for `demos/mobile_acceptance.py`.
 That script checks the mobile page with Firefox and uses only sample devices.
 
+`demos/mobile_layout_acceptance.py` checks the hosted and local sample controls at 320 and 375 pixels, with normal and 200% text.
+It rejects overlaps, horizontal overflow, split button words, and disabled-button contrast below 4.5:1.
+It also checks registration, People, and connection alerts through isolated API fixtures and saves screenshots in `.test-runs/pj78-mobile`.
+
 For synthetic external changes, send JSON to `POST /demo/fixtures`:
 `{"light_id":"sofa-lamp","state":"on"}`.
 Use `off` for an external off state or `unavailable` for a persistent sample failure.
@@ -113,7 +117,7 @@ Rotation retires the old invitation and short alias. It preserves verified bookm
 The registration server checks current approval, expiration, and revocation before each control command.
 The local `approve` hook also accepts an optional finite Unix timestamp with `--expires-at`.
 
-Codes expire after 5 minutes.
+Codes expire after 10 minutes.
 Each email has at most 5 verification attempts and 3 code sends per 15-minute window, with a 30-second resend delay.
 The whole demo also permits at most 20 code sends per 15-minute window across all emails.
 These counters survive restarts and rotation. Unverified requests never create a pending guest or an owner notice.
@@ -199,5 +203,8 @@ This project uses the [MIT License](LICENSE).
 ## Validation still required
 
 The approved external route uses authenticated outbound HTTPS and server-observed public IPv4 egress matching.
+An approved guest sees a red alert when their connection differs from the last reported home connection.
+An unavailable or stale home connection has a separate message. The page checks again automatically.
+These messages do not extend command permission or prove physical Wi-Fi presence.
 The real hosted source topology, ISP refresh, mail, and physical guest acceptance still require validation.
 No live setup or device operation follows from the synthetic test results.

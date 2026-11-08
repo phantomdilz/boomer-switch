@@ -29,7 +29,7 @@ def _digest(value: str) -> str:
 class RegistrationStore:
     """Keep demo registration and fake mail in one SQLite transaction owner."""
 
-    CODE_SECONDS = 300
+    CODE_SECONDS = 600
     WINDOW_SECONDS = 900
     RESEND_SECONDS = 30
     MAX_SENDS = 3
