@@ -8,6 +8,7 @@ import secrets
 import hmac
 
 from .registration import RegistrationStore
+from .mail_signing import MessagePreparationError, message_bytes
 
 
 class WebsiteMail:
@@ -64,7 +65,7 @@ class WebsiteMail:
                 db.execute("UPDATE mailbox SET code=NULL WHERE id=?", (row["id"],))
             try:
                 self.transport.send(message)
-            except MailPaused:
+            except (MailPaused, MessagePreparationError):
                 # No provider attempt occurred. Keep the unsent message recoverable.
                 with self.store._transaction() as db:
                     db.execute("DELETE FROM mail_delivery WHERE id=? AND state='unknown'", (row['id'],))
@@ -89,13 +90,17 @@ class MailPaused(RuntimeError):
 
 
 class SMTPTransport:
-    def __init__(self, host, port, username, password, *, implicit_tls=False):
+    def __init__(self, host, port, username, password, *, implicit_tls=False, signer=None):
         if not isinstance(host, str) or not host or type(port) is not int or not 1 <= port <= 65535:
             raise ValueError("Configure a valid SMTP endpoint.")
         self.host, self.port = host, port
         self.username, self.password, self.implicit_tls = username, password, implicit_tls
+        self.signer=signer
 
     def send(self, message):
+        sender = RegistrationStore._email(str(message["From"]))
+        recipient = RegistrationStore._email(str(message["To"]))
+        raw = message_bytes(message,self.signer)
         context = ssl.create_default_context()
         client = smtplib.SMTP_SSL(self.host, self.port, timeout=5, context=context) if self.implicit_tls else smtplib.SMTP(self.host, self.port, timeout=5)
         try:
@@ -103,21 +108,21 @@ class SMTPTransport:
                 client.starttls(context=context)
             if self.username:
                 client.login(self.username, self.password)
-            client.send_message(message, from_addr=RegistrationStore._email(str(message["From"])),
-                                to_addrs=[RegistrationStore._email(str(message["To"]))])
+            client.sendmail(sender,[recipient],raw)
         finally:
             client.close()
 
 
 class SendmailTransport:
-    def __init__(self, executable):
+    def __init__(self, executable, *, signer=None):
         from pathlib import Path
         if not Path(executable).is_absolute():
             raise ValueError("Configure an absolute sendmail path.")
         self.executable = executable
+        self.signer=signer
 
     def send(self, message):
         sender = RegistrationStore._email(str(message["From"]))
         recipient = RegistrationStore._email(str(message["To"]))
-        subprocess.run([self.executable, "-i", "-f", sender, "--", recipient], input=message.as_bytes(),
+        subprocess.run([self.executable, "-i", "-f", sender, "--", recipient], input=message_bytes(message,self.signer),
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, check=True)
