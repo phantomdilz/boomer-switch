@@ -1,0 +1,23 @@
+{
+  "state_directory": "/PRIVATE_STATE_DIRECTORY",
+  "origin": "https://example.invalid",
+  "mount": "/house-lights",
+  "owner_identity": "CONFIGURED_OWNER_IDENTITY",
+  "service_key": "REPLACE_WITH_PRIVATE_RANDOM_SERVICE_KEY",
+  "idle_poll_seconds": 15,
+  "mail": {
+    "transport": "sendmail",
+    "executable": "/PRIVATE_SENDMAIL_EXECUTABLE",
+    "sender": "sender@example.invalid",
+    "owner": "owner@example.invalid"
+  },
+  "passenger": {
+    "registration_enabled": false,
+    "mail_enabled": false,
+    "people_write_enabled": false,
+    "pilot_enabled": false,
+    "apache_peer_verified": false,
+    "owner_cookie": "EXISTING_OWNER_COOKIE",
+    "owner_validator_command": ["/PRIVATE_PHP_EXECUTABLE", "-f", "/PRIVATE_OWNER_VALIDATOR.php", "--", "verify"]
+  }
+}

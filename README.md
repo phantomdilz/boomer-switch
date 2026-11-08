@@ -4,6 +4,8 @@ A mobile-friendly web page that lets invited, owner-approved guests turn househo
 
 **Status:** synthetic demos and an outbound-only home runner are available. Hosted integration and physical acceptance remain unverified.
 
+The [Passenger installation contract](docs/HOSTED_REGISTRATION.md#passenger-and-private-python) includes the production adapter, private configuration example, and separate registration, mail, People, and pilot pause switches. Installation and live effects require operator approval.
+
 ## Goals
 - Guests on the home's main Wi-Fi or guest Wi-Fi control selected lights from a browser and a bookmark.
 - Lights grouped by room with recognizable names (e.g. "Lamp beside the sofa"), large On/Off controls.

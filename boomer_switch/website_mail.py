@@ -64,6 +64,12 @@ class WebsiteMail:
                 db.execute("UPDATE mailbox SET code=NULL WHERE id=?", (row["id"],))
             try:
                 self.transport.send(message)
+            except MailPaused:
+                # No provider attempt occurred. Keep the unsent message recoverable.
+                with self.store._transaction() as db:
+                    db.execute("DELETE FROM mail_delivery WHERE id=? AND state='unknown'", (row['id'],))
+                    db.execute("UPDATE mailbox SET code=? WHERE id=?", (row['code'], row['id']))
+                raise MailUnavailable("Website mail is paused. Try again after service resumes.") from None
             except Exception:
                 # The provider can accept a message before the connection fails.
                 # Keep the claim and never retry this operation automatically.
@@ -76,6 +82,10 @@ class WebsiteMail:
 
 class MailUnavailable(RuntimeError):
     """Mail delivery requires an operator check or a new bounded request."""
+
+
+class MailPaused(RuntimeError):
+    """The transport refused before any provider attempt."""
 
 
 class SMTPTransport:

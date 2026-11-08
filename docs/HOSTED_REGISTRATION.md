@@ -35,7 +35,94 @@ The IPv4-only origin must also support the owner's existing sign-in on that orig
 A new hostname does not automatically share a host-only sign-in cookie.
 Keep the existing website root and login unchanged until a scoped installation plan resolves that integration.
 
-## PHP and private Python
+## Passenger and private Python
+
+Use `boomer_switch.website_passenger.load_application` for the persistent Passenger route.
+It composes the same production factory, canonical store, mail owner, and home rendezvous as the CGI route.
+It adds hosting proof, current private owner validation, and explicit rollout switches.
+It starts no network listener and sends no mail at startup.
+
+Install the wheel with the `website` extra in a private Python 3.11 or later environment with SQLite and SSL.
+The wheel includes startup and configuration examples under `share/boomer-switch/hosting`.
+Copy `hosting/passenger_wsgi.py` to the private Passenger application root.
+Copy the JSON example there as `config.local.passenger.json`, restrict its permissions, and replace every placeholder locally.
+Keep the application root, validator, configuration, and canonical state outside the document root.
+Configure Passenger's WSGI application root, startup file, private Python executable, and the dedicated base URI.
+The base URI must equal JSON `mount`; its trusted WSGI `SCRIPT_NAME` must match exactly.
+The server must supply HTTPS scheme and the exact configured host, and enforce a 25-second total request deadline and a 4096-byte body limit.
+
+Apache must overwrite the peer header on every request in this namespace:
+
+```apache
+RequestHeader set X-HL-Apache-Peer "expr=%{CONN_REMOTE_ADDR}"
+```
+
+Use the physical connection variable `CONN_REMOTE_ADDR`, not the possibly rewritten `REMOTE_ADDR` expression.
+Verify this overwrite with normal and forged-header requests before setting `apache_peer_verified` true.
+The adapter requires its value to equal Passenger `REMOTE_ADDR` on each private or pilot request.
+Never substitute a client-supplied header, forwarded address, or a Boolean from a request.
+An unsupported proxy topology stays closed.
+
+The private `owner_validator_command` is an absolute array command for the existing PHP owner-session validator.
+It reads one raw cookie value from stdin (at most 1024 bytes), emits exactly `MATCH` on success, and exits zero.
+Every other output, error, timeout, or absent cookie denies access.
+The validator must run in the foreground without background children and must not log the cookie.
+Its existing private configuration retains the site's owner secret; do not copy that secret into this component.
+`owner_cookie` selects the existing cookie name. Arbitrary identity headers and inherited `REMOTE_USER` are ignored.
+The adapter revalidates the owner at dispatch after reading the body; People retains its CSRF and revision checks.
+
+Keep the existing website login and access rules outside this namespace unchanged.
+Route the component's public guest page, `entry.js`, `website.js`, `style.css`, invitation links, registration APIs, and authenticated `/home/*` APIs to this application.
+Keep `/people`, `/people.js`, and `/api/people` behind its private validator.
+Do not retain the read-only stage's GET-only route allowlist when promoting registration.
+Publish the app, page, scripts, and scoped Apache asset rule together as one new release.
+Do not modify a staged immutable release in place.
+
+Replace the stage's GET-only Apache login exceptions with this exact component route/method set.
+Apply each path relative to the configured mount, with an end anchor; do not exempt the website root or the whole namespace from login.
+
+| Method | Component path | Apache login rule | Application check |
+| --- | --- | --- | --- |
+| GET | `/`, `/guest`, `/entry.js`, `/website.js`, `/style.css` | Public | Exact HTTPS host and mount |
+| GET | `/s/<alias>`, `/invite/<token>` | Public | Stateless invitation redirect; registration validates the invitation |
+| GET | `/api/access` | Public | Canonical guest session; private light labels require current permission and source |
+| POST | `/api/invite`, `/api/register`, `/api/resend`, `/api/verify` | Public | Origin, session CSRF, invitation, limits, and rollout switches |
+| POST | `/api/lights` | Public | Origin, CSRF, current approval, fresh matching source, and pilot switch |
+| GET | `/api/operations/<uuid>` | Public | Current guest approval, matching source, and operation ownership |
+| POST | `/home/poll`, `/home/authorize`, `/home/result` | Public | Private machine Bearer key and canonical source/operation policy |
+| GET | `/people`, `/people.js`, `/api/people` | Existing owner login required | Current private owner validator and bound owner session |
+| POST | `/api/people` | Existing owner login required | Current validator after body, owner CSRF, revision, and People write switch |
+
+Limit alias, token, and UUID suffixes to one path segment. Other methods and paths get no login exception.
+Do not add exceptions for demo mailbox, operator, exchange, or retired grant routes.
+The existing owner sign-in must remain usable on this exact origin.
+Verify both an anonymous private request and a signed-in People request through the actual Apache gate before promotion.
+
+Suppress request targets, query strings, Referer, cookies, and authorization headers in access/error diagnostics for this namespace.
+Retained legacy `/invite/<token>` and typed `/s/<alias>` requests contain invitation secrets in their path.
+Use scoped logs with method, status, and duration only, or exclude these component requests from target-bearing logs.
+Apply the same rule to upstream hosting logs, traces, and error reports before publishing a card.
+New full invitation fragments never enter the HTTP request target; keep `Referrer-Policy: no-referrer`.
+
+All `passenger` switches in the example are false. Replace the private JSON atomically to change switches.
+The application rereads them for each request, after body reading, and immediately before a mail attempt.
+Fixed settings (paths, origin, credentials, validator) require an approved Passenger restart.
+
+1. Verify read-only guest assets and private People with all effect switches off.
+2. After mail authority and transport checks, enable `registration_enabled` and `mail_enabled` together.
+   Enable `people_write_enabled` only when owner changes are approved.
+3. Enable `pilot_enabled` only after the separate home-agent, source, and hardware preflight.
+   A paused pilot reports no home readiness or light labels and does not create browser demand.
+
+Turn an effect switch off to pause it. Existing approvals and bookmarks remain in canonical state.
+An authenticated `/home/result` can still acknowledge an already accepted result while the pilot is paused.
+No paused route can grant a new device operation.
+A mail pause before the provider attempt leaves the unsent row recoverable through normal bounded delivery after resume.
+An actual uncertain provider attempt remains `unknown` and never retries automatically.
+Preserve the canonical state directory during code rollback. Never restore old permission decisions.
+This package does not install Apache rules, validate a real owner cookie, send a live test message, or start the home agent.
+
+## Alternate PHP-to-CGI route
 
 Use Python 3.11 or later with SQLite and SSL.
 Install the `website` extra in a private virtual environment.
@@ -83,16 +170,15 @@ The private JSON file holds:
 The production factory is `boomer_switch.website_cgi.create_application`.
 It opens the canonical store in production mode and creates the rendezvous owner.
 It does not enable the old home callback, exchange, or grant endpoints.
-A direct WSGI host must supply a trusted HTTPS scheme, `REMOTE_ADDR`, and server-only `boomer.direct_peer=True`.
-It must also enforce the equivalent 25-second total request limit.
-Never derive these values from client headers.
+Use the Passenger adapter above for the supported persistent WSGI boundary.
+Do not expose the bare production factory without equivalent trusted hosting and owner validation.
 
 ## Mail
 
 For SMTP, `mail` holds `transport: smtp`, `host`, numeric `port`, `sender`, and `owner`.
 It can also hold `username`, `password`, and Boolean `implicit_tls`.
 SMTP always uses certificate-verified TLS. Its socket operations have a 5-second timeout each.
-The PHP process limit provides the outer deadline.
+The hosting request limit provides the outer deadline.
 
 For the existing local mail facility, use `transport: sendmail`, an absolute `executable`, `sender`, and `owner`.
 Do not provision a new provider.
