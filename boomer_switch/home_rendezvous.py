@@ -8,6 +8,7 @@ import uuid
 
 from .configuration import service_key as validate_service_key, light_metadata, light_catalog
 from .registration import AccessDenied, _digest
+from .state_updates import StateUpdates
 
 
 class HomeUnavailable(RuntimeError):
@@ -70,6 +71,7 @@ class HomeRendezvous:
             db.execute('CREATE INDEX IF NOT EXISTS home_session ON home_operations(session,invalidated,status)')
             db.execute("CREATE INDEX IF NOT EXISTS home_read_expiry ON home_operations(expires) WHERE action='read'")
             db.execute("CREATE INDEX IF NOT EXISTS home_compaction ON home_operations(expires) WHERE action!='read' AND session!=''")
+            StateUpdates.install(db)
 
     @staticmethod
     def peer(environ):
@@ -149,6 +151,15 @@ class HomeRendezvous:
         with self.store._transaction() as db:
             return self._catalog(self._guest(db, raw, peer))
 
+    def display_state(self, raw, environ):
+        peer = self._guest_peer(raw, environ)
+        with self.store._transaction() as db:
+            current = self._guest(db, raw, peer)
+            catalog = self._catalog(current)
+            return {'lights':catalog, 'state_generation':current['generation'], 'state_time':self.store.clock(),
+                    'states':StateUpdates.snapshots(db,current,catalog,self.store.clock()),
+                    'automatic_updates':True}
+
     def display(self, raw, environ):
         values = self.display_lights(raw, environ)
         if len(values) != 1:
@@ -163,10 +174,16 @@ class HomeRendezvous:
 
     def _compact(self, db):
         cutoff = self.store.clock()-60
-        db.execute("DELETE FROM home_operations WHERE action='read' AND expires<?", (cutoff,))
+        current = db.execute('SELECT * FROM home_connection WHERE id=1').fetchone()
+        keep = StateUpdates.read_keepers(db,current)
+        clause = ' AND id NOT IN ('+','.join('?' for _ in keep)+')' if keep else ''
+        db.execute("DELETE FROM home_operations WHERE action='read' AND expires<?"+clause, (cutoff,*keep))
+        db.execute("UPDATE home_operations SET peer='',session='' WHERE action='read' AND expires<?", (cutoff,))
         db.execute("UPDATE home_operations SET peer='',session='' WHERE action!='read' AND session!='' AND expires<? AND (status='completed' OR (status='queued' AND poll_sequence IS NULL))", (cutoff,))
 
     def enqueue(self, raw, environ, body):
+        if isinstance(body,dict) and 'background' in body:
+            return self.automatic(raw,environ,body)
         if not isinstance(body, dict) or set(body) not in ({'operation_id','action'}, {'operation_id','action','light_id'}) or body['action'] not in ('read','on','off'):
             raise ValueError
         operation_id, peer = identifier(body['operation_id']), self._guest_peer(raw,environ)
@@ -185,7 +202,9 @@ class HomeRendezvous:
                 if previous['session'] != _digest(raw) or previous['action'] != body['action'] or previous['generation'] != current['generation'] or previous['light_id'] != target:
                     raise OperationConflict("This operation cannot be reused.")
                 return self._projection(previous)
-            if db.execute("SELECT 1 FROM home_operations WHERE expires>? AND generation=? AND invalidated=0 AND status IN ('queued','leased','authorized') LIMIT 1", (now,current['generation'])).fetchone():
+            # An unleased automatic read has no physical effect to preserve.
+            db.execute("UPDATE home_operations SET invalidated=1,status='not_started' WHERE background=1 AND generation=? AND status='queued' AND poll_sequence IS NULL AND invalidated=0", (current['generation'],))
+            if db.execute("SELECT 1 FROM home_operations WHERE background=0 AND expires>? AND generation=? AND invalidated=0 AND status IN ('queued','leased','authorized') LIMIT 1", (now,current['generation'])).fetchone():
                 raise OperationConflict("Wait for the current operation to finish.")
             # The home runner refreshes this target before final dispatch authorization.
             # Its target-bound journal blocks uncertain commands until a confirmed read.
@@ -193,6 +212,31 @@ class HomeRendezvous:
             db.execute('INSERT INTO home_operations(id,session,peer,generation,action,status,created,expires,poll_sequence,outcome,completed,light_id,targeted) VALUES (?,?,?,?,?,?,?, ?,NULL,NULL,NULL,?,?)',
                        (operation_id,_digest(raw),peer,current['generation'],body['action'],'queued',now,now+self.TTL,target,int('light_id' in body)))
             return self._projection(db.execute('SELECT * FROM home_operations WHERE id=?', (operation_id,)).fetchone())
+
+    def automatic(self, raw, environ, body):
+        if (set(body) != {'operation_id','action','background','preferred'} or body['background'] is not True or body['action']!='read'
+                or not isinstance(body['preferred'],list) or len(body['preferred'])>32
+                or any(not isinstance(value,str) for value in body['preferred']) or len(set(body['preferred']))!=len(body['preferred'])):
+            raise ValueError
+        operation_id, peer = identifier(body['operation_id']), self._guest_peer(raw,environ)
+        now = self.store.clock()
+        with self.store._transaction() as db:
+            current = self._guest(db,raw,peer)
+            catalog = self._catalog(current)
+            if not set(body['preferred']) <= {item['light_id'] for item in catalog}:
+                raise AccessDenied('Select an allowed light.')
+            self._compact(db)
+            previous = db.execute('SELECT * FROM home_operations WHERE id=?',(operation_id,)).fetchone()
+            if previous is not None:
+                if not previous['background'] or previous['session']!=_digest(raw) or previous['generation']!=current['generation']:
+                    raise OperationConflict('This operation cannot be reused.')
+                return {'background':True,'state_time':now}
+            pending = db.execute("SELECT 1 FROM home_operations WHERE expires>? AND generation=? AND invalidated=0 AND status IN ('queued','leased','authorized') LIMIT 1", (now,current['generation'])).fetchone()
+            target = None if pending else StateUpdates.target(db,current,catalog,set(body['preferred']),now)
+            if target is not None:
+                db.execute("INSERT INTO home_operations(id,session,peer,generation,action,status,created,expires,light_id,targeted,background) VALUES (?,?,?,?,'read','queued',?,?,?,1,1)",
+                           (operation_id,_digest(raw),peer,current['generation'],now,now+self.TTL,target))
+            return {'background':True,'state_time':now}
 
     def operation(self, raw, environ, operation_id):
         operation_id, peer = identifier(operation_id), self._guest_peer(raw,environ)
@@ -290,7 +334,6 @@ class HomeRendezvous:
         if fleet and (not isinstance(revision, str) or not re.fullmatch('[a-f0-9]{64}', revision)):
             raise ValueError
         encoded = json.dumps(lights if fleet else lights[0], sort_keys=True)
-        self._compact(db)
         current = db.execute('SELECT * FROM home_connection WHERE id=1').fetchone()
         if current and (current['agent'] != body['agent_id'] or body['sequence'] < current['sequence']):
             raise OperationConflict("The home poll is stale or belongs to another agent.")
@@ -301,11 +344,13 @@ class HomeRendezvous:
             if current['request_id'] != body['request_id'] or current['peer'] != peer or current['seen']+self.FRESH <= now or not current['valid'] or current['light'] != encoded or current['catalog_revision'] != revision:
                 raise OperationConflict("The home poll cannot be replayed.")
             generation = current['generation']
+            self._compact(db)
             operation = db.execute('SELECT * FROM home_operations WHERE id=?', (current['last_operation'],)).fetchone()
         else:
             generation = current['generation'] + int(current['peer'] != peer or (current['valid'] and current['seen']+self.FRESH <= now) or current['light'] != encoded or current['catalog_revision'] != revision) if current else 1
             db.execute('INSERT OR REPLACE INTO home_connection(id,agent,sequence,request_id,peer,generation,seen,last_operation,valid,active,light,catalog_revision) VALUES (1,?,?,?,?,?,?,NULL,1,0,?,?)',
                        (body['agent_id'],body['sequence'],body['request_id'],peer,generation,now,encoded,revision))
+            self._compact(db)
             operation = db.execute("SELECT * FROM home_operations WHERE status='queued' AND invalidated=0 AND generation=? AND peer=? AND expires>? ORDER BY created LIMIT 1", (generation,peer,now)).fetchone()
             if operation and not self._approved(db,operation['session']):
                 db.execute("UPDATE home_operations SET status='denied' WHERE id=?", (operation['id'],))
