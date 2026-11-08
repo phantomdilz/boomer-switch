@@ -409,7 +409,7 @@ def test_actual_cgi_entry_uses_fake_mail_and_current_source_rendezvous(tmp_path)
     assert home('authorize',4,assignment,source_b)[2]['allowed'] is False
     assert cgi('/grant','POST',{},auth='Bearer '+'k'*40)[0]==404
     assert cgi('/exchange','POST',{},auth='Bearer '+'k'*40)[0]==404
-    assert [json.loads(line)['to'] for line in inbox.read_text().splitlines()] == ['guest@example.invalid','owner@example.invalid']
+    assert [json.loads(line)['to'] for line in inbox.read_text().splitlines()] == ['guest@example.invalid']
 
 
 def test_card_origin_approved_guest_receives_only_fixed_home_entry(hosted):
@@ -422,7 +422,7 @@ def test_card_origin_approved_guest_receives_only_fixed_home_entry(hosted):
     assert invoke(app, '/api/handoff', 'POST', {'challenge':'c'*43,'state':'s'*43,'callback':'https://other.invalid/'},cookie,result['csrf'])[0] == 400
 
 
-def test_native_php_bridge_runs_real_cgi_and_keeps_site_owner_cookie_private(tmp_path):
+def test_native_php_bridge_runs_real_cgi_and_keeps_site_owner_cookie_private(tmp_path, php_runtime):
     import os
     from pathlib import Path
     import socket
@@ -430,9 +430,7 @@ def test_native_php_bridge_runs_real_cgi_and_keeps_site_owner_cookie_private(tmp
     import sys
     import time
     from http.client import HTTPConnection
-    php = Path(__file__).resolve().parents[1] / 'data/php-runtime/bin/php.exe'
-    if not php.exists():
-        pytest.skip('The optional native PHP runtime is unavailable.')
+    php = php_runtime
     root = Path(__file__).resolve().parents[1]
     release = tmp_path / 'release'
     package = release / 'boomer_switch'

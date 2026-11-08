@@ -8,8 +8,11 @@
   "mail": {
     "transport": "sendmail",
     "executable": "/PRIVATE_SENDMAIL_EXECUTABLE",
-    "sender": "sender@example.invalid",
-    "owner": "owner@example.invalid"
+    "sender": "sender@example.invalid"
+  },
+  "owner_notifications": {
+    "command": ["/PRIVATE_PHP_EXECUTABLE", "-f", "/PRIVATE_BOT_BRIDGE/owner_telegram_cli.php", "--", "/PRIVATE_EXISTING_BOT_CONFIG.php", "/PRIVATE_OWNER_SETTINGS.php"],
+    "decision_key": "REPLACE_WITH_PRIVATE_OWNER_DECISION_KEY"
   },
   "passenger": {
     "registration_enabled": false,
