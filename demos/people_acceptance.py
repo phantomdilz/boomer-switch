@@ -67,7 +67,7 @@ def run() -> None:
             login_url = json.loads(result.stdout)["login_url"]
             assert login_url.startswith(owner_url + "/")
             invitation = operator(state, "card", "--base-url", guest_url)["invite_url"]
-            assert invitation.startswith(guest_url + "/invite/")
+            assert invitation.startswith(guest_url + "/guest#invitation=")
 
             with sync_playwright() as playwright:
                 browser = playwright.firefox.launch()

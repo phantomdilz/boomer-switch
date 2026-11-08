@@ -6,10 +6,10 @@ from http.cookies import SimpleCookie
 from importlib.resources import files
 import json
 import secrets
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 from .people import OwnerPrincipal, PeopleApplication, owner_cookie
-from .registration import AccessDenied, _digest
+from .registration import AccessDenied, InvalidInvitation, _digest
 from .website_mail import MailUnavailable
 from .home_rendezvous import HomeUnavailable, OperationConflict
 from .website_grants import json_object
@@ -142,20 +142,18 @@ class WebsiteApplication:
             if method == "GET" and path.startswith("/s/"):
                 token = self.store.resolve_alias(path[3:])
                 status, payload = "303 See Other", {}
-                headers.append(("Location", self.mount + "/invite/" + token))
+                headers.append(("Location", self.mount + "/guest#" + urlencode({"invitation": token})))
             elif method == "GET" and path.startswith("/invite/"):
                 # Finish the invitation after a same-origin API call restores Strict cookies.
                 token = path[8:]
-                if not token or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for c in token):
-                    raise AccessDenied("Invitation unavailable.")
                 status, payload = "303 See Other", {}
-                headers.append(("Location", self.mount + "/guest#invitation=" + token))
+                headers.append(("Location", self.mount + "/guest#" + urlencode({"invitation": token})))
             elif method == "GET" and path in ("/", "/guest"):
                 # A cross-site navigation can suppress a Strict cookie.
                 # Bootstrap only after the page makes its same-origin API call.
                 content_type = "text/html; charset=utf-8"
                 payload = files("boomer_switch").joinpath("web", "website.html").read_bytes()
-            elif method == "GET" and path in ("/website.js", "/style.css"):
+            elif method == "GET" and path in ("/entry.js", "/website.js", "/style.css"):
                 content_type = "text/javascript; charset=utf-8" if path.endswith(".js") else "text/css; charset=utf-8"
                 payload = files("boomer_switch").joinpath("web", path[1:]).read_bytes()
             elif method == "GET" and path == "/api/access":
@@ -172,7 +170,14 @@ class WebsiteApplication:
                 body = self._body(environ, raw)
                 if set(body) != {"invitation"}:
                     raise ValueError
-                new_raw = self.store.browser(body["invitation"], existing=raw)
+                try:
+                    if not isinstance(body["invitation"], str):
+                        raise InvalidInvitation("Invitation unavailable.")
+                    new_raw = self.store.browser(body["invitation"], existing=raw)
+                except InvalidInvitation:
+                    if self.store.reject_browser(raw):
+                        headers.append(("Set-Cookie", self._cookie("bs_session", "", 0)))
+                    raise
                 if new_raw != raw:
                     headers.append(("Set-Cookie", self._cookie("bs_session", new_raw)))
                 payload = self._access(new_raw, environ)
@@ -197,6 +202,12 @@ class WebsiteApplication:
                 status, payload = "404 Not Found", {"error": "Page unavailable."}
         except OperationConflict as error:
             status, payload = "409 Conflict", {"error": str(error)}
+        except InvalidInvitation as error:
+            if method == "GET":
+                status, payload = "303 See Other", {}
+                headers.append(("Location", self.mount + "/guest#invitation="))
+            else:
+                status, payload = "403 Forbidden", {"error": str(error), "code": "invitation_unavailable"}
         except AccessDenied as error:
             status, payload = "403 Forbidden", {"error": str(error)}
         except HomeUnavailable as error:

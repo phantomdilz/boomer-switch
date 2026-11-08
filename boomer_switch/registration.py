@@ -14,6 +14,10 @@ class AccessDenied(ValueError):
     """The request cannot establish current access."""
 
 
+class InvalidInvitation(AccessDenied):
+    """The invitation is absent, malformed, or retired."""
+
+
 class StalePerson(ValueError):
     """The owner action does not match the current person record."""
 
@@ -121,24 +125,25 @@ class RegistrationStore:
     def resolve_alias(self, alias):
         with self._transaction() as db:
             if not re.fullmatch(r"[a-z0-9]{1,64}", alias) or not hmac.compare_digest(alias, self._setting(db, "alias").replace(" ", "")):
-                raise AccessDenied("Invitation unavailable.")
+                raise InvalidInvitation("Invitation unavailable.")
             return self._setting(db, "invitation")
 
     def browser(self, invitation=None, *, existing=None):
         raw = secrets.token_urlsafe(32)
         with self._transaction() as db:
-            if invitation is not None and not hmac.compare_digest(invitation, self._setting(db, "invitation")):
-                raise AccessDenied("Invitation unavailable.")
+            if invitation is not None and (not isinstance(invitation, str) or not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", invitation)
+                    or not hmac.compare_digest(invitation, self._setting(db, "invitation"))):
+                raise InvalidInvitation("Invitation unavailable.")
             previous = db.execute("SELECT * FROM sessions WHERE id=? AND expires>?", (_digest(existing or ""), self.clock())).fetchone()
             if invitation is not None and previous is not None and previous["verified"]:
                 guest = db.execute("SELECT * FROM guests WHERE email=?", (previous["email"],)).fetchone()
                 if self._active(guest) or (guest is not None and guest["status"] == "pending"):
                     return existing
+            if previous is not None and not previous["verified"] and previous["invitation"] == invitation:
+                return existing
             if self.mode == "production":
                 db.execute("DELETE FROM challenges WHERE session IN (SELECT id FROM sessions WHERE expires<=?)", (self.clock(),))
                 db.execute("DELETE FROM sessions WHERE expires<=?", (self.clock(),))
-                if previous is not None and previous["invitation"] == invitation:
-                    return existing
                 if db.execute("SELECT COUNT(*) FROM sessions WHERE verified=0").fetchone()[0] >= 1000:
                     raise AccessDenied("Registration is busy. Try again later.")
             db.execute("INSERT INTO sessions(id, invitation, expires) VALUES (?, ?, ?)",

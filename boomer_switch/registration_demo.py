@@ -8,10 +8,10 @@ from io import BytesIO
 import json
 from pathlib import Path
 import tempfile
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 from .demo import DemoServer, _DemoHandler
-from .registration import AccessDenied, RegistrationStore
+from .registration import AccessDenied, InvalidInvitation, RegistrationStore
 
 
 class RegistrationDemoServer(DemoServer):
@@ -43,34 +43,36 @@ class _RegistrationHandler(_DemoHandler):
         try:
             if path.startswith("/s/"):
                 token = self.server.registration.resolve_alias(path[3:])
-                self._reply(302, {}, headers=(("Location", f"/invite/{token}"),))
+                self._reply(302, {}, headers=(("Location", "/guest#" + urlencode({"invitation": token})),))
             elif path.startswith("/invite/"):
-                raw = self.server.registration.browser(path[len("/invite/"):], existing=self._session())
-                self._reply(302, {}, headers=(("Location", "/guest"), self._cookie(raw)))
+                self._reply(302, {}, headers=(("Location", "/guest#" + urlencode({"invitation": path[8:]})),))
             elif path == "/":
                 self._reply(302, {}, headers=(("Location", "/guest"),))
             elif path == "/guest":
-                headers = ()
-                if self.server.registration.status(self._session()) == "anonymous":
-                    headers = (self._cookie(self.server.registration.browser()),)
                 self._reply(200, files("boomer_switch").joinpath("web", "registration.html").read_bytes(),
-                            "text/html; charset=utf-8", headers=headers)
+                            "text/html; charset=utf-8")
+            elif path == "/entry.js":
+                self._reply(200, files("boomer_switch").joinpath("web", "entry.js").read_bytes(), "text/javascript; charset=utf-8")
             elif path == "/registration.js":
                 self._reply(200, files("boomer_switch").joinpath("web", "registration.js").read_bytes(), "text/javascript; charset=utf-8")
             elif path == "/api/access":
-                self._reply(200, {"status": self.server.registration.status(self._session())})
+                raw = self._session()
+                headers = ()
+                if self.server.registration.status(raw) == "anonymous":
+                    current = self.server.registration.browser(existing=raw)
+                    if current != raw:
+                        headers = (self._cookie(current),)
+                    raw = current
+                self._reply(200, {"status": self.server.registration.status(raw)}, headers=headers)
             elif path == "/api/lights":
                 self.server.registration.require_access(self._session())
                 super().do_GET()
             else:
                 super().do_GET()
+        except InvalidInvitation:
+            self._reply(302, {}, headers=(("Location", "/guest#invitation="),))
         except AccessDenied as error:
-            if path.startswith(("/s/", "/invite/")):
-                rejected = self.server.registration.reject_browser(self._session())
-                headers = (("Set-Cookie", "bs_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"),) if rejected else ()
-                self._reply(403, {"error": str(error)}, headers=headers)
-            else:
-                self._reply(403, {"error": str(error)})
+            self._reply(403, {"error": str(error)})
 
     def do_POST(self):
         length = None
@@ -82,7 +84,7 @@ class _RegistrationHandler(_DemoHandler):
             if self.path.startswith("/api/lights/"):
                 super().do_POST()
                 return
-            if self.path not in ("/api/register", "/api/verify", "/api/resend"):
+            if self.path not in ("/api/invite", "/api/register", "/api/verify", "/api/resend"):
                 self._reject_unread_body(None, status=404, body={"error": "Page unavailable."})
                 return
             length = int(self.headers.get("Content-Length", "0"))
@@ -93,7 +95,14 @@ class _RegistrationHandler(_DemoHandler):
             if not isinstance(body, dict):
                 raise ValueError
             raw = self._session()
-            if self.path == "/api/register" and set(body) == {"name", "email"}:
+            if self.path == "/api/invite" and set(body) == {"invitation"}:
+                if not isinstance(body["invitation"], str):
+                    raise InvalidInvitation("Invitation unavailable.")
+                current = self.server.registration.browser(body["invitation"], existing=raw)
+                headers = (self._cookie(current),) if current != raw else ()
+                self._reply(200, {"status": self.server.registration.status(current)}, headers=headers)
+                return
+            elif self.path == "/api/register" and set(body) == {"name", "email"}:
                 self.server.registration.start(raw, body["name"], body["email"])
             elif self.path == "/api/verify" and set(body) == {"code"}:
                 self.server.registration.verify(raw, body["code"])
@@ -102,6 +111,10 @@ class _RegistrationHandler(_DemoHandler):
             else:
                 raise ValueError
             self._reply(200, {"status": self.server.registration.status(raw)})
+        except InvalidInvitation as error:
+            rejected = self.server.registration.reject_browser(self._session())
+            headers = (("Set-Cookie", "bs_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"),) if rejected else ()
+            self._reply(403, {"error": str(error), "code": "invitation_unavailable"}, headers=headers)
         except AccessDenied as error:
             self._reply(403, {"error": str(error)})
         except (ValueError, TypeError):
@@ -127,7 +140,7 @@ def printable_card(store, directory, base_url, *, pdf_template=None):
         raise ValueError("Use the printed local demo address.")
     base_url = base_url.rstrip("/")
     invitation = store.invitation()
-    invite_url = f"{base_url}/invite/{invitation['token']}"
+    invite_url = base_url + "/guest#" + urlencode({"invitation": invitation["token"]})
     short_url = f"{base_url}/s/{invitation['alias']}"
     card = directory / "card.html"
     if pdf_template is not None:

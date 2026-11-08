@@ -68,3 +68,4 @@ label { font-weight: 650; }
 @media (prefers-reduced-motion: no-preference) {
   button { transition: background-color .15s, border-color .15s; }
 }
+fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }

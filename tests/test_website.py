@@ -60,6 +60,57 @@ def guest(hosted):
     return cookie, csrf
 
 
+def test_invitation_preview_is_stateless_and_bootstrap_acceptance_is_idempotent(hosted):
+    app, store, transport = hosted
+    token = store.invitation()['token']
+    for path in ('/guest', '/invite/'+token, '/s/'+store.invitation()['alias']):
+        status, headers, _ = invoke(app, path, HTTP_SEC_FETCH_SITE='cross-site')
+        assert status in (200, 303) and 'Set-Cookie' not in headers
+        assert headers['Referrer-Policy'] == 'no-referrer'
+    with store._transaction() as db:
+        assert db.execute('SELECT COUNT(*) FROM sessions').fetchone()[0] == 0
+    cookie, csrf = guest(hosted)
+    status, headers, payload = invoke(app, '/api/invite', 'POST', {'invitation':token}, cookie, csrf)
+    assert status == 200 and 'Set-Cookie' not in headers and json.loads(payload)['status'] == 'invited'
+    assert not transport.messages
+    assert invoke(app, '/api/register', 'POST', {'name':'Guest','email':'guest@example.invalid'}, cookie, csrf)[0] == 200
+    before = len(transport.messages)
+    assert json.loads(invoke(app, '/api/invite', 'POST', {'invitation':token}, cookie, csrf)[2])['status'] == 'verify'
+    assert invoke(app, '/api/register', 'POST', {'name':'Guest','email':'guest@example.invalid'}, cookie, csrf)[0] == 403
+    assert len(transport.messages) == before == 1
+
+
+@pytest.mark.parametrize('invalid', [None, True, '', 'retired', '\u2603'])
+def test_invalid_invitation_acknowledgement_never_grants_mail_and_preserves_approved(hosted, invalid):
+    app, store, transport = hosted
+    cookie, csrf = guest(hosted)
+    status, headers, payload = invoke(app, '/api/invite', 'POST', {'invitation':invalid}, cookie, csrf)
+    assert status == 403 and json.loads(payload)['code'] == 'invitation_unavailable'
+    assert 'Max-Age=0' in headers['Set-Cookie']
+    assert invoke(app, '/api/register', 'POST', {'name':'Guest','email':'guest@example.invalid'}, cookie, csrf)[0] == 403
+    assert not transport.messages
+    cookie, csrf = verify(hosted)
+    store.operator('approve', 'guest@example.invalid')
+    before = len(transport.messages)
+    status, headers, _ = invoke(app, '/api/invite', 'POST', {'invitation':invalid}, cookie, csrf)
+    assert status == 403 and 'Set-Cookie' not in headers
+    assert json.loads(invoke(app, '/api/access', cookie=cookie)[2])['status'] == 'approved'
+    assert len(transport.messages) == before
+
+
+def test_shared_browser_invitation_state_machine_without_a_browser():
+    import shutil
+    import subprocess
+    from pathlib import Path
+    node = shutil.which('node')
+    if node is None:
+        pytest.skip('Node.js is required for the optional pure JavaScript state-machine checks.')
+    root = Path(__file__).parents[1]
+    result = subprocess.run([node, str(root/'tests/entry_cases.cjs'), str(root/'boomer_switch/web/entry.js')],
+        capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def verify(hosted):
     app, store, transport = hosted
     cookie, csrf = guest(hosted)
