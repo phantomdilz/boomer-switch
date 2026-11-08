@@ -34,7 +34,7 @@ h2 { margin: 0 0 .8rem; font-size: 1.1rem; }
 h3 { margin: 0; font-size: 1.1rem; overflow-wrap: anywhere; }
 .state { flex-shrink: 0; padding: .35rem .65rem; border-radius: 1rem; font-size: .85rem; font-weight: 650; background: #eef0ed; }
 .state[data-state="on"] { color: #21512f; background: #e0f0dd; }
-.state[data-state="unavailable"] { color: #6d4219; background: #fff0d7; }
+.state[data-state="unavailable"], .state[data-state="stale"] { color: #6d4219; background: #fff0d7; }
 .actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 7rem), 1fr)); gap: .75rem; }
 button {
   min-height: 3.5rem;
@@ -130,4 +130,3 @@ section.room {
 .room > .light + .light { border-top: 1px solid #9ba99d; }
 .light-detail { line-height: 1.45; overflow-wrap: anywhere; }
 .state[data-state="unknown"] { color: #6d4219; background: #fff0d7; }
-.state[data-state="stale"] { color: #6d4219; background: #fff0d7; }
