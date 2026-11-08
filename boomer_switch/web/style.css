@@ -69,7 +69,7 @@ label { font-weight: 650; }
   .light { padding: 1.35rem; }
 }
 @media (prefers-reduced-motion: no-preference) {
-  button { transition: background-color .15s, border-color .15s; }
+  button { transition: border-color .15s; }
 }
 fieldset { display: grid; gap: .75rem; border: 0; padding: 0; margin: 0; min-width: 0; }
 
