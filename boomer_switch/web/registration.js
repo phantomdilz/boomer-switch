@@ -8,6 +8,12 @@ let submitting = false;
 let controlsLoaded = false;
 let accessVersion = 0;
 let accessState;
+const entry = window.HouseLightsEntry;
+const retryAccess = document.querySelector("#retry-access");
+function enableForms() {
+  document.querySelectorAll("form fieldset").forEach(fieldset => fieldset.disabled = submitting || !entry.canSubmit);
+  document.querySelector("#entry-recovery").hidden = !entry.recoveryHint;
+}
 
 async function accessRequest(path, body) {
   const controller = new AbortController();
@@ -19,7 +25,11 @@ async function accessRequest(path, body) {
       body: body ? JSON.stringify(body) : undefined,
     });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.error || "Access unavailable.");
+    if (!response.ok) {
+      const error = new Error(result.error || "Access unavailable.");
+      error.status = response.status; error.code = result.code;
+      throw error;
+    }
     return result;
   } finally { clearTimeout(timeout); }
 }
@@ -33,6 +43,7 @@ function showAccess(status) {
     anonymous: "Open an invitation, or verify an approved email again.",
     invited: "Enter your name and email.", verify: "Enter the code from your email.",
     pending: "Waiting for approval", approved: "Access approved", denied: "Access unavailable. Contact the owner.",
+    invalid_invitation: "Invitation unavailable. Open a current invitation.",
   }[status] || "Access unavailable.";
   if (accessStatus.textContent !== text) accessStatus.textContent = text;
   if (status === "approved" && !controlsLoaded) {
@@ -43,28 +54,38 @@ function showAccess(status) {
   }
 }
 
-async function checkAccess() {
-  if (checking || submitting || document.hidden || ["anonymous", "invited", "verify"].includes(accessState)) return;
+async function checkAccess(force = false) {
+  if (checking || submitting || document.hidden || (!force && entry.ready && ["anonymous", "invited", "verify", "invalid_invitation"].includes(accessState))) return;
   checking = true;
   const startedVersion = accessVersion;
   try {
-    const result = await accessRequest("/api/access");
-    if (startedVersion === accessVersion) showAccess(result.status);
+    const result = await entry.bootstrap(accessRequest, "/api/access", "/api/invite");
+    if (startedVersion === accessVersion) { showAccess(result.status); retryAccess.hidden = true; }
   }
-  catch { if (startedVersion === accessVersion) showAccess("unavailable"); }
-  finally { checking = false; }
+  catch {
+    if (startedVersion === accessVersion) {
+      entry.invalidate();
+      showAccess("unavailable");
+      accessStatus.textContent = "Access unavailable. The page will check again.";
+      retryAccess.hidden = false;
+    }
+  }
+  finally { checking = false; enableForms(); }
 }
 
 async function submit(path, body) {
-  if (submitting) return;
+  if (submitting || !entry.canSubmit) return;
   accessVersion += 1;
   submitting = true;
-  for (const button of document.querySelectorAll("form button")) button.disabled = true;
+  enableForms();
   try { showAccess((await accessRequest(path, body)).status); }
-  catch (error) { accessStatus.textContent = error.message; }
+  catch (error) {
+    accessStatus.textContent = error.message;
+    if (!error.status || error.status >= 500) { entry.invalidate(); retryAccess.hidden = false; }
+  }
   finally {
     submitting = false;
-    for (const button of document.querySelectorAll("form button")) button.disabled = false;
+    enableForms();
   }
 }
 
@@ -77,6 +98,9 @@ verification.addEventListener("submit", event => {
   submit("/api/verify", {code: document.querySelector("#code").value});
 });
 document.querySelector("#resend-code").addEventListener("click", () => submit("/api/resend", {}));
-document.addEventListener("visibilitychange", checkAccess);
+retryAccess.addEventListener("click", () => checkAccess(true));
+window.addEventListener("house-lights-entry", () => { accessVersion += 1; enableForms(); checkAccess(true); });
+document.addEventListener("visibilitychange", () => checkAccess());
 checkAccess();
+enableForms();
 setInterval(checkAccess, 1500);

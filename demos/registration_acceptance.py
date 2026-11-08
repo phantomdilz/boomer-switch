@@ -58,7 +58,7 @@ def run() -> None:
             STEP = "card"
             card = operator(state, "card", "--base-url", base)
             invite_url, short_url = card["invite_url"], card["short_url"]
-            assert invite_url.startswith(base + "/invite/")
+            assert invite_url.startswith(base + "/guest#invitation=")
             assert short_url.startswith(base + "/s/")
             card_path = Path(card["printable_card"]).resolve()
             assert card_path.is_relative_to(state.resolve())
