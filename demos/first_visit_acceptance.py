@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from html import escape
+import json
 from pathlib import Path
 import re
 import secrets
@@ -193,13 +194,67 @@ def run():
                             write_launcher(launcher, address)
                             page.goto(launcher.as_uri(), wait_until="domcontentloaded")
                             page.locator("#open").click()
-                        def first_visit(label, address):
+                        def first_visit(label, address, fault):
                             global STEP
                             STEP = f"{kind} {label} link"
                             browser_context = context()
                             page = browser_context.new_page()
+                            fault_script = r"""(() => {
+                                const mode = MODE;
+                                const original = window.fetch.bind(window);
+                                let gate = null;
+                                window.__faultHold = true;
+                                window.__faultStarted = false;
+                                window.__registerLost = false;
+                                window.__releaseFault = () => { window.__faultHold = false; if (gate) gate(); };
+                                window.fetch = async (input, options) => {
+                                    const pathname = new URL(typeof input === 'string' ? input : input.url, location.href).pathname;
+                                    if (mode === 'delay' && pathname.endsWith('/api/access') && window.__faultHold) {
+                                        window.__faultStarted = true;
+                                        await new Promise(resolve => { gate = resolve; });
+                                    }
+                                    if ((mode === 'access' || (mode === 'register' && window.__registerLost)) && pathname.endsWith('/api/access') && window.__faultHold) {
+                                        window.__faultStarted = true;
+                                        throw new TypeError('Synthetic temporary transport failure');
+                                    }
+                                    if (mode === 'invite' && pathname.endsWith('/api/invite') && window.__faultHold) {
+                                        const response = await original(input, options);
+                                        window.__faultStarted = true;
+                                        throw new TypeError('Synthetic lost invitation response');
+                                    }
+                                    if (mode === 'register' && pathname.endsWith('/api/register') && !window.__registerLost) {
+                                        const response = await original(input, options);
+                                        window.__registerLost = true;
+                                        throw new TypeError('Synthetic lost registration response');
+                                    }
+                                    return original(input, options);
+                                };
+                            })();""".replace("MODE", json.dumps(fault))
+                            page.add_init_script(script=fault_script)
+                            register_requests = []
+                            page.on("request", lambda request: register_requests.append(1) if request.method == "POST" and request.url == mount + "/api/register" else None)
+                            before_fault = count_mail()
                             open_link(page, address)
                             page.wait_for_url(mount + "/guest", timeout=15000)
+                            if fault == "delay":
+                                STEP = f"{kind} delayed bootstrap fast tap"
+                                page.wait_for_function("window.__faultStarted === true", timeout=15000)
+                                check(page.locator("#send-code").evaluate("element => element.matches(':disabled')"), f"{kind} bootstrap disables Send code")
+                                submitted = page.locator("#details").evaluate("""form => {
+                                    let calls = 0;
+                                    form.addEventListener('submit', () => { calls += 1; }, {once: true});
+                                    form.requestSubmit();
+                                    return calls;
+                                }""")
+                                check(submitted == 1, f"{kind} fast submit reached guard", f"events={submitted}")
+                                check(len(register_requests) == 0 and count_mail() == before_fault, f"{kind} fast tap sends nothing", f"posts={len(register_requests)}")
+                                page.evaluate("window.__releaseFault()")
+                            elif fault in ("access", "invite"):
+                                STEP = f"{kind} transient {fault} recovery"
+                                page.locator("#retry-access").wait_for(state="visible", timeout=15000)
+                                check(len(register_requests) == 0 and count_mail() == before_fault, f"{kind} {fault} failure sends nothing", f"posts={len(register_requests)}")
+                                page.evaluate("window.__releaseFault()")
+                                page.locator("#retry-access").click()
                             expect(page.locator("#name")).to_be_visible(timeout=15000)
                             email = f"{kind}-{label}@example.invalid"
                             page.locator("#name").fill("Sample Guest")
@@ -211,7 +266,13 @@ def run():
                             with page.expect_response(lambda response: response.url == mount + "/api/register" and response.request.method == "POST") as registered:
                                 send.click()
                             check(registered.value.status == 200, STEP, f"HTTP={registered.value.status}")
+                            if fault == "register":
+                                STEP = f"{kind} lost registration response recovery"
+                                page.locator("#retry-access").wait_for(state="visible", timeout=15000)
+                                page.evaluate("window.__releaseFault()")
+                                page.locator("#retry-access").click()
                             page.locator("#code").wait_for(state="visible", timeout=15000)
+                            check(len(register_requests) == 1, f"{kind} {label} one explicit registration", f"posts={len(register_requests)}")
                             if kind == "hosted":
                                 received = [m for m in inbox.messages if str(m["To"]) == email]
                                 check(len(received) == 1, f"{kind} {label} fake code", f"messages={len(received)}")
@@ -227,14 +288,15 @@ def run():
                             verify = page.locator("#verify-code") if kind == "demo" else page.locator("#verification button:not([type]), #verification button[type=submit]").first
                             verify.click()
                             page.get_by_text("Waiting for approval", exact=True).wait_for(state="visible", timeout=15000)
+                            check(len(register_requests) == 1, f"{kind} {label} no registration retry", f"posts={len(register_requests)}")
                             check(page.url == mount + "/guest", f"{kind} {label} clean URL")
                             return browser_context, page, email
 
                         launcher_count = 0
-                        full_context, full_page, full_email = first_visit("full", full)
-                        short_context, _, _ = first_visit("short", short)
-                        qr_context, _, _ = first_visit("qr", decoded)
-                        legacy_context, _, _ = first_visit("legacy", legacy)
+                        full_context, full_page, full_email = first_visit("full", full, "delay")
+                        short_context, _, _ = first_visit("short", short, "access")
+                        qr_context, _, _ = first_visit("qr", decoded, "invite")
+                        legacy_context, _, _ = first_visit("legacy", legacy, "register")
                         short_context.close()
                         qr_context.close()
                         legacy_context.close()
