@@ -19,13 +19,14 @@ try {
     $owner = ($config['owner_authenticated'])() === true;
     $https = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on';
     if (!$https) { http_response_code(403); exit; }
-    $length = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
-    if ($length < 0 || $length > 4096) { http_response_code(413); exit; }
-    $body = file_get_contents('php://input', false, null, 0, 4097);
-    if ($body === false || strlen($body) > 4096) { http_response_code(413); exit; }
     $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
     $mount = $config['mount'];
     if (!is_string($path) || !str_starts_with($path, $mount . '/')) { http_response_code(404); exit; }
+    $limit = $path === $mount . '/home/poll' ? 131072 : 4096;
+    $length = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
+    if ($length < 0 || $length > $limit) { http_response_code(413); exit; }
+    $body = file_get_contents('php://input', false, null, 0, $limit + 1);
+    if ($body === false || strlen($body) > $limit) { http_response_code(413); exit; }
     $componentCookies = [];
     foreach (['bs_session', 'bs_owner'] as $name) {
         $value = $_COOKIE[$name] ?? null;

@@ -1,4 +1,4 @@
-# Outbound one-lamp home connection
+# Outbound selected-light home connection
 
 Guests use the public website for registration, bookmarks, and light controls.
 The home runner makes authenticated outbound HTTPS requests to that website.
@@ -9,7 +9,7 @@ The website manages verified identity and owner permission. Device credentials a
 
 Install the `pilot` extra in an isolated Python 3.11-or-later environment.
 Copy `home.example.json` to the ignored `config.local.home.json` and replace its placeholders privately.
-Use the existing private allowlist, then select one standalone lamp by `light_id`.
+For single-lamp mode, use the existing private allowlist and select one standalone lamp by `light_id`.
 Discovery uses `device_host` only as a hint. The resolver checks the exact configured device ID and type before every operation.
 Optional device `username` and `password` fields must both be present when needed.
 
@@ -24,6 +24,37 @@ On upgrade, keep the existing physical target's journal path in `operation_db` s
 
 The journal creates a stable random agent ID and saves the next poll sequence before each network try.
 Run one home process per journal. The process lock rejects a second normal runner.
+
+### Multiple selected lights
+
+Use `home-fleet.example.json` for 1 through 32 standalone lights.
+List each selected public ID in `light_ids` and supply its private discovery hint in `device_hosts`.
+Every selected ID must exist in the private allowlist. Extra discovery hints and excluded IDs stop configuration.
+The `light_id` field retains the original journal lamp and must remain selected.
+The remaining fields and command-line entry point stay the same. Omit the single-lamp `device_host` field in this mode.
+Add `--check-config` to either Python entry point to validate the selection without device queries, network calls, or journal changes.
+The home runner never discovers or controls an unselected device.
+
+Stop the existing runner before the upgrade. Retain its journal and operation receipts.
+The normal entry point obtains the journal lock before configuration can migrate the journal.
+The migration keeps the physical binding, agent ID, poll sequence, receipts, and command marks.
+It binds legacy command marks only to the original physical lamp.
+Each new target has a saved physical binding. Reusing its public ID for a different physical device fails closed.
+The new code rejects single-lamp mode on a migrated journal. Pre-upgrade binaries cannot detect this new journal marker.
+Never let a pre-upgrade binary open a fleet journal: its global read reconciliation can clear another lamp's uncertain marks.
+A rollback must retain a fleet-compatible journal reader and all accepted results.
+Keep the stopped journal's backup for recovery and reconcile unresolved operations before any rollback that changes its format.
+
+A confirmed read reconciles uncertain commands only for that physical lamp.
+An uncertain lamp A does not block lamp B after the accepted receipt reaches the website.
+One operation runs at a time. A transport failure retains the accepted result for receipt recovery before another assignment.
+No background device scan occurs. A guest's explicit refresh or command supplies the target ID.
+The website requires a recent confirmed result for that same light before an On or Off command.
+
+The guest catalog contains only public IDs, names, and rooms. It appears only after approval and current source checks.
+Reachability comes from the requested device read. A failed or uncertain read is unavailable, not confirmed Off.
+The UI receives `online` for a fresh confirmed result, `unknown` for an uncertain or expired result, and `unavailable` otherwise.
+These values do not prove whether an unresponsive lamp has power.
 
 ## Approved network rule
 
@@ -52,6 +83,12 @@ The configured website URL is a fixed HTTPS prefix. The runner posts only to the
 - `/home/authorize` receives `{agent_id,sequence,operation_id,generation,request_id}`.
 - `/home/result` receives those assignment fields and an `outcome` object.
 
+Multi-light polls replace `light` with `lights` and a stable `catalog_revision` for the selected physical bindings and metadata.
+Their assignments, authorization requests, and result receipts include the exact `light_id`.
+The catalog has at most 32 entries. Only `/home/poll` permits a body of up to 131072 bytes, including escaped Unicode labels.
+Other request limits stay unchanged. A catalog revision change retires prior dispatch authority but retains accepted operation truth.
+Legacy single-lamp poll, assignment, and receipt shapes remain supported.
+
 Each request uses the private service bearer key and verified TLS.
 Requests have a 2-second total timeout, bounded response size, no redirects, no environment proxy, and no automatic retry.
 No public IP is stored in home configuration or sent as a claimed source.
@@ -62,7 +99,7 @@ The website exposes those labels only after current approval and egress checks. 
 
 Poll responses bind the request ID, positive generation, source freshness deadline, optional operation, and `poll_after`.
 An operation contains only its UUID, `read`/`on`/`off` action, session hash, generation, and expiry.
-The home runner has one privately selected lamp. The website cannot supply a different network address or physical target.
+The home runner routes only to its privately selected lamps. The website cannot supply a network address or physical device identity.
 The source proof lasts at most 6 seconds. Operations expire within 8 seconds and are leased once, with no offline replay.
 
 The website normally requests a 15-second idle poll interval and a 1-second active interval.

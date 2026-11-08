@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from .configuration import POLL_BYTES
 from .registration import AccessDenied
 from .website import OWNER_PATHS, REGISTRATION_MAIL_PATHS
 from .website_cgi import create_application
@@ -45,11 +46,11 @@ class PHPValidator:
 
 
 class _PolicyInput:
-    def __init__(self, source, check):
-        self.source, self.check = source, check
+    def __init__(self, source, check, limit=4096):
+        self.source, self.check, self.limit = source, check, limit
 
     def read(self, length=-1):
-        if not 0 <= length <= 4096:
+        if not 0 <= length <= self.limit:
             raise AccessDenied("Use a bounded website request.")
         body = self.source.read(length)
         self.check()
@@ -158,7 +159,8 @@ class PassengerApplication:
             if environ.get("PATH_INFO") == "":
                 environ["PATH_INFO"] = "/"
             length = int(environ.get("CONTENT_LENGTH") or 0)
-            if not 0 <= length <= 4096:
+            limit = POLL_BYTES if environ.get("PATH_INFO") == "/home/poll" else 4096
+            if not 0 <= length <= limit:
                 return self._reply(start_response, "413 Content Too Large")
             self._allowed(environ)
             if environ.get("PATH_INFO") in OWNER_PATHS:
@@ -166,7 +168,7 @@ class PassengerApplication:
                     self._allowed(environ)
                     return self.config["owner_identity"] if self.validator.check(environ) else None
                 environ["boomer.resolve_identity"] = identity
-            environ["wsgi.input"] = _PolicyInput(environ["wsgi.input"], lambda: self._allowed(environ))
+            environ["wsgi.input"] = _PolicyInput(environ["wsgi.input"], lambda: self._allowed(environ), limit)
             return self.app(environ, start_response)
         except AccessDenied:
             return self._reply(start_response, "403 Forbidden")
