@@ -201,12 +201,17 @@ def run():
                             page = browser_context.new_page()
                             fault_script = r"""(() => {
                                 const mode = MODE;
+                                try { if (sessionStorage.getItem('__fixtureFaultDone') === '1') return; } catch {}
                                 const original = window.fetch.bind(window);
                                 let gate = null;
                                 window.__faultHold = true;
                                 window.__faultStarted = false;
                                 window.__registerLost = false;
-                                window.__releaseFault = () => { window.__faultHold = false; if (gate) gate(); };
+                                window.__releaseFault = () => {
+                                    window.__faultHold = false;
+                                    try { sessionStorage.setItem('__fixtureFaultDone', '1'); } catch {}
+                                    if (gate) gate();
+                                };
                                 window.fetch = async (input, options) => {
                                     const pathname = new URL(typeof input === 'string' ? input : input.url, location.href).pathname;
                                     if (mode === 'delay' && pathname.endsWith('/api/access') && window.__faultHold) {
