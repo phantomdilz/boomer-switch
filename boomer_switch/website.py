@@ -102,7 +102,7 @@ class WebsiteApplication:
             result["home_ready"] = result.get("home_status") == "ready"
             if result["home_ready"]:
                 result["direct_commands"] = True
-                result["lights"] = self.rendezvous.display_lights(raw, environ or {})
+                result.update(self.rendezvous.display_state(raw, environ or {}))
                 if len(result["lights"]) == 1:
                     result["light"] = result["lights"][0]
         if self.rendezvous is None and status == "approved" and self.handoff is not None:
@@ -188,7 +188,10 @@ class WebsiteApplication:
                     headers.append(("Set-Cookie", self._cookie("bs_session", raw)))
                 payload = self._access(raw, environ)
             elif method == "POST" and path == "/api/lights" and self.rendezvous is not None:
-                payload = self.rendezvous.enqueue(raw, environ, self._body(environ, raw))
+                body = self._body(environ, raw)
+                payload = self.rendezvous.enqueue(raw, environ, body)
+                if payload.get('background') is True:
+                    payload = self._access(raw,environ) | {'next_update_ms':2000,'state_time':payload['state_time']}
                 status = "202 Accepted"
             elif method == "GET" and path.startswith("/api/operations/") and self.rendezvous is not None:
                 payload = self.rendezvous.operation(raw, environ, path.rsplit("/",1)[1])

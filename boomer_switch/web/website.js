@@ -28,6 +28,49 @@ let lastAccess = 0;
 let catalogSignature = "";
 let legacyCatalog = false;
 let directCommands = false;
+let automaticUpdates = false;
+let stateGeneration = null;
+class UpdateClock {
+  constructor(read, apply, failed) {
+    this.read = read; this.apply = apply; this.failed = failed;
+    this.active = false; this.pending = null; this.epoch = 0; this.next = 0; this.delay = 2000;
+  }
+  setActive(active) {
+    if (active === this.active) return;
+    this.active = active; this.interrupt();
+  }
+  interrupt() { this.epoch += 1; this.next = Date.now() + this.delay; }
+  async tick() {
+    if (!this.active || this.pending || Date.now() < this.next || busy || operation) return;
+    const current = {epoch:this.epoch}; this.pending = current;
+    try {
+      const result = await this.read();
+      if (!this.active || current.epoch !== this.epoch) return;
+      this.delay = 2000;
+      this.apply(result);
+    } catch (error) {
+      if (!this.active || current.epoch !== this.epoch) return;
+      this.delay = Math.min(30000, this.delay * 2);
+      this.failed(error);
+    } finally {
+      if (this.pending === current) this.pending = null;
+      this.next = Date.now() + this.delay;
+    }
+  }
+}
+function preferredLights() {
+  return [...lights.values()].filter(light => {
+    const rect = light.card.getBoundingClientRect?.();
+    return rect && rect.bottom > 0 && rect.top < window.innerHeight;
+  }).map(light => light.light_id);
+}
+const updates = new UpdateClock(
+  () => request("api/lights", {operation_id:crypto.randomUUID(), action:"read", background:true, preferred:preferredLights()}, 3000),
+  result => { lastAccess = Date.now(); show(result); },
+  () => {
+    homeReady = false; lastAccess = 0;
+    clearControls("State updates are unavailable. Checking home access again.");
+  });
 function enableForms() {
   document.querySelectorAll("form fieldset").forEach(fieldset => fieldset.disabled = busy || !entry.canSubmit);
   document.querySelector("#entry-recovery").hidden = !entry.recoveryHint;
@@ -54,16 +97,18 @@ function text(element, value) {
   if (element.textContent !== value) element.textContent = value;
 }
 function syncControls() {
-  if (homeReady && approved) connectionMessage(operation ? "Waiting for " + lights.get(operation.lightId)?.name + "." : "Choose a light. State is checked only when you request it.");
+  if (homeReady && approved) connectionMessage(operation ? "Waiting for " + lights.get(operation.lightId)?.name + "." : automaticUpdates ? "States update automatically while this page is visible." : "Choose a light. State is checked only when you request it.");
   for (const light of lights.values()) {
     const pending = operation?.lightId === light.light_id;
-    const fresh = light.confirmedAt !== null && Date.now() >= light.confirmedAt && Date.now() - light.confirmedAt < 5000;
-    const state = fresh ? light.state : light.state === "on" || light.state === "off" ? "unknown" : light.state;
-    light.card.dataset.availability = state === "on" || state === "off" ? "online" : state === "unavailable" ? "unavailable" : "unknown";
-    text(light.stateLine, pending ? "Checking" : {on: "On", off: "Off", unknown: "Unknown", unavailable: "Unavailable", unchecked: "Not checked"}[state]);
-    light.stateLine.dataset.state = light.card.dataset.availability === "online" ? light.state : light.card.dataset.availability;
-    text(light.detail, pending ? operation.message : !fresh && light.confirmedAt !== null
-      ? "Last confirmed: " + (light.state === "on" ? "On" : "Off") + ". Choose Refresh state to check again."
+    const fresh = light.confirmedAt !== null && Date.now() >= light.confirmedAt && Date.now() - light.confirmedAt < (automaticUpdates ? 45000 : 5000);
+    const state = fresh ? light.state : light.state === "on" || light.state === "off" ? "stale" : light.state;
+    light.card.dataset.availability = state === "on" || state === "off" ? "online" : state === "stale" ? "stale" : state === "unavailable" ? "unavailable" : "unknown";
+    text(light.stateLine, pending ? "Checking" : state === "stale" ? light.state === "on" ? "On" : "Off" : {on: "On", off: "Off", unknown: "Unknown", unavailable: "Unavailable", unchecked: "Not checked"}[state]);
+    light.stateLine.dataset.state = state;
+    const last = light.lastConfirmed;
+    const elapsed = last && Date.now() >= last.at ? Math.floor((Date.now()-last.at)/1000) : null;
+    text(light.detail, pending ? operation.message : elapsed !== null
+      ? "Last confirmed: " + (last.state === "on" ? "On" : "Off") + " · " + elapsed + "s ago." + (state === "stale" ? " Stale; waiting for an update." : ["unknown","unavailable"].includes(state) ? " Current state is " + state + "." : "")
       : light.message);
     const blocked = !homeReady || busy || operation !== null;
     light.on.disabled = blocked || light.needsRefresh;
@@ -75,6 +120,7 @@ function syncControls() {
   }
 }
 function clearControls(message) {
+  updates.setActive(false); automaticUpdates = false; stateGeneration = null;
   version += 1;
   operation = null;
   controls.hidden = true;
@@ -100,7 +146,7 @@ function renderCatalog(items, legacy) {
   const ordered = [...items].sort((a, b) => a.room.localeCompare(b.room) || a.name.localeCompare(b.name) || a.light_id.localeCompare(b.light_id));
   const signature = JSON.stringify([legacy, ordered.map(({light_id, name, room}) => [light_id, name, room])]);
   if (signature === catalogSignature) return;
-  version += 1; operation = null; lights.clear(); rooms.replaceChildren();
+  updates.interrupt(); version += 1; operation = null; lights.clear(); rooms.replaceChildren();
   catalogSignature = signature; legacyCatalog = legacy;
   const prompt = document.createElement("option");
   prompt.value = "";
@@ -138,10 +184,42 @@ function renderCatalog(items, legacy) {
     }
     actions.append(on, off); card.append(heading, stateLine, detail, actions, refresh); group.append(card);
     lights.set(item.light_id, {...item, card, stateLine, detail, on, off, refresh,
-      state: "unchecked", confirmedAt: null, needsRefresh: false, message: "Choose Refresh state, On, or Off. State is checked only when requested."});
+      state: "unchecked", confirmedAt: null, lastConfirmed:null, reportSample:null, uncertain:false, recoveryBarrier:null, needsRefresh: false, message: "Waiting for a device report. You can also choose Refresh state, On, or Off."});
   }
   roomNavigation.hidden = groups.size < 2;
   syncControls();
+}
+function showStates(result) {
+  if (!Number.isSafeInteger(result.state_generation) || result.state_generation < 1 || !Number.isFinite(result.state_time) || !Array.isArray(result.states) || result.states.length !== lights.size) throw Error("State reports unavailable.");
+  const seen = new Set();
+  for (const item of result.states) {
+    const age = value => value === null || Number.isSafeInteger(value) && value >= 0;
+    if (!item || !lights.has(item.light_id) || seen.has(item.light_id) || !["on","off","unavailable"].includes(item.state)
+      || !["online","stale","unknown","unavailable","unchecked"].includes(item.availability)
+      || !age(item.age_ms) || !(item.sample === null || Number.isFinite(item.sample))
+      || (["online","stale"].includes(item.availability) && (!["on","off"].includes(item.state) || item.age_ms === null))
+      || (item.availability === "online" && item.age_ms >= 45000)
+      || (item.last_confirmed !== null && (!item.last_confirmed || !["on","off"].includes(item.last_confirmed.state) || !age(item.last_confirmed.age_ms)))) throw Error("State reports unavailable.");
+    seen.add(item.light_id);
+  }
+  if (stateGeneration !== result.state_generation) {
+    for (const light of lights.values()) {light.state="unchecked"; light.confirmedAt=null; light.lastConfirmed=null; light.reportSample=null; light.recoveryBarrier=null; light.needsRefresh=light.uncertain;}
+    stateGeneration = result.state_generation;
+  }
+  for (const item of result.states) {
+    const light = lights.get(item.light_id);
+    if (operation?.lightId === item.light_id || item.sample !== null && light.reportSample !== null && item.sample < light.reportSample) continue;
+    if (light.uncertain) {
+      if (light.recoveryBarrier === null) light.recoveryBarrier = result.state_time;
+      if (item.sample === null || item.sample <= light.recoveryBarrier || item.availability !== "online") continue;
+      light.uncertain = false; light.recoveryBarrier = null;
+    }
+    light.reportSample = item.sample;
+    light.state = item.state === "unavailable" && item.availability === "unchecked" ? "unchecked" : item.state === "unavailable" && item.availability === "unknown" ? "unknown" : item.state;
+    light.confirmedAt = ["online","stale"].includes(item.availability) ? Date.now()-item.age_ms : null;
+    light.lastConfirmed = item.last_confirmed && item.last_confirmed.age_ms !== null ? {state:item.last_confirmed.state,at:Date.now()-item.last_confirmed.age_ms} : null;
+    light.needsRefresh = ["unknown","unavailable"].includes(item.availability);
+  }
 }
 function show(result) {
   approved = result.status === "approved";
@@ -160,6 +238,9 @@ function show(result) {
     clearControls(message); connectionMessage(message, mismatch);
   } else {
     renderCatalog(catalog(result), !Object.hasOwn(result, "lights"));
+    automaticUpdates = result.automatic_updates === true;
+    if (automaticUpdates) showStates(result);
+    updates.setActive(automaticUpdates && !document.hidden);
     controls.hidden = false;
     connectionMessage("Choose a light. State is checked only when you request it.");
     syncControls();
@@ -180,6 +261,7 @@ verification.addEventListener("submit", event => {event.preventDefault(); submit
 document.querySelector("#resend").addEventListener("click", () => submit("api/resend", {}));
 function finishUnavailable(light, state, message) {
   operation = null; light.state = state; light.confirmedAt = null; light.needsRefresh = true; light.message = message;
+  if (state === "unknown") {light.uncertain = true; light.recoveryBarrier = null;}
   syncControls();
 }
 function operationError(error, light) {
@@ -192,6 +274,7 @@ function operationError(error, light) {
 async function startOperation(action, lightId, followUp = null) {
   const light = lights.get(lightId);
   if (busy || operation || !homeReady || !light || (action !== "read" && light.needsRefresh)) return;
+  updates.interrupt();
   const fresh = light.confirmedAt !== null && Date.now() >= light.confirmedAt && Date.now() - light.confirmedAt < 4000;
   if (action !== "read" && !fresh && !directCommands) { followUp = action; action = "read"; }
   version += 1; busy = true;
@@ -228,7 +311,8 @@ async function checkOperation() {
     if (result.light_id !== current.lightId && !(legacyCatalog && lights.size === 1 && result.light_id === undefined)) throw Error("Result target is unavailable.");
     if (result.status === "confirmed" && ["on", "off"].includes(result.state)
       && (result.availability === "online" || result.availability === undefined && legacyCatalog && lights.size === 1)) {
-      operation = null; light.state = result.state; light.confirmedAt = Date.now(); light.needsRefresh = false;
+      operation = null; light.state = result.state; light.confirmedAt = Date.now(); light.lastConfirmed = {state:result.state,at:Date.now()}; light.needsRefresh = false;
+      light.uncertain = false; light.recoveryBarrier = null;
       light.message = "Confirmed state from this light."; syncControls();
       if (current.followUp) await startOperation(current.followUp, current.lightId);
     } else if (["unknown", "denied", "not_started", "confirmed"].includes(result.status) || Date.now() >= current.until) {
@@ -242,6 +326,7 @@ async function checkOperation() {
 async function refresh() {
   syncControls();
   if (busy || checking || document.hidden) return;
+  if (automaticUpdates && homeReady && !operation) { void updates.tick(); return; }
   checking = true; const started = version;
   try {
     if (Date.now() - lastAccess < 3000) {
