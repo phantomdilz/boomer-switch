@@ -1,0 +1,12 @@
+{
+  "allowlist_file": "config.local.devices.json",
+  "light_id": "sample-lamp",
+  "light_ids": ["sample-lamp", "second-lamp"],
+  "device_hosts": {
+    "sample-lamp": "PRIVATE_FIRST_DEVICE_DISCOVERY_HINT",
+    "second-lamp": "PRIVATE_SECOND_DEVICE_DISCOVERY_HINT"
+  },
+  "website_url": "https://example.invalid/house-lights",
+  "website_key": "REPLACE_WITH_PRIVATE_RANDOM_SERVICE_KEY",
+  "operation_db": "data/pilot-commands.sqlite"
+}

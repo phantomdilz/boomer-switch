@@ -18,7 +18,7 @@ import uuid
 
 import aiohttp
 
-from .configuration import service_key as validate_service_key, light_metadata
+from .configuration import service_key as validate_service_key, light_metadata, light_catalog
 from .kasa_pilot import KasaPilotResolver
 from .lights import CommandDenied, LightService, LightState, load_allowlist
 from .pilot import CommandJournal, DuplicateCommand, runtime_lock
@@ -52,15 +52,18 @@ class Assignment:
     expires: float
     generation: int
     sequence: int
+    light_id: str | None = None
 
     @classmethod
     def parse(cls, value, generation, sequence, now):
-        if not isinstance(value, dict) or set(value) != {"operation_id", "action", "session_binding", "expires", "generation"}:
+        if not isinstance(value, dict) or set(value) not in ({"operation_id", "action", "session_binding", "expires", "generation"}, {"operation_id", "action", "session_binding", "expires", "generation", "light_id"}):
             raise ValueError
         operation_id(value["operation_id"])
         if value["action"] not in ("read", "on", "off") or integer(value["generation"]) != generation:
             raise ValueError
         if not isinstance(value["session_binding"], str) or not re.fullmatch("[a-f0-9]{64}", value["session_binding"]):
+            raise ValueError
+        if "light_id" in value and (not isinstance(value["light_id"], str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", value["light_id"])):
             raise ValueError
         future(value["expires"], now, 8)
         return cls(sequence=sequence, **value)
@@ -70,7 +73,7 @@ class OutboundJournal(CommandJournal):
     """Commit sequence numbers and outcomes beside the physical dispatch record."""
 
     def __init__(self, path, device_id, website_url, *, clock=time.time):
-        super().__init__(path, device_id)
+        super().__init__(path, device_id, allow_fleet=getattr(self, "fleet", False))
         self.clock = clock
         binding = hashlib.sha256(website_url.encode()).hexdigest()
         with self._transaction() as db:
@@ -114,6 +117,8 @@ class OutboundJournal(CommandJournal):
     def complete(self, assignment, outcome, status):
         body = {"agent_id": self.agent_id, "sequence": assignment.sequence, "operation_id": assignment.operation_id,
             "generation": assignment.generation, "request_id": str(uuid.uuid4()), "outcome": outcome}
+        if assignment.light_id is not None:
+            body["light_id"] = assignment.light_id
         with self._transaction() as db:
             db.execute("BEGIN IMMEDIATE")
             if status is not None:
@@ -187,6 +192,8 @@ class WebsiteTransport:
     async def authorize(self, agent_id, assignment):
         body = {"agent_id": agent_id, "sequence": assignment.sequence, "operation_id": assignment.operation_id,
             "generation": assignment.generation, "request_id": str(uuid.uuid4())}
+        if assignment.light_id is not None:
+            body["light_id"] = assignment.light_id
         result = await self.post("authorize", body)
         if set(result) != {"allowed", "request_id", "operation_id", "generation", "expires"}:
             raise PermissionUnavailable
@@ -204,11 +211,26 @@ class HomeRunner:
     """Dispatch one current website assignment after a fresh authorization at the lamp boundary."""
 
     def __init__(self, light, resolver, transport, journal, *, clock=time.time):
-        if journal.identity != hashlib.sha256(light.device_id.encode()).hexdigest():
-            raise ValueError("Use the journal bound to this physical lamp.")
-        self.light, self.resolver, self.transport, self.journal, self.clock = light, resolver, transport, journal, clock
-        self.service = LightService((light,), resolver, timeout_seconds=8)
-        light_metadata(self.service.lights()[0])
+        lights = tuple(light) if isinstance(light, (list, tuple)) else (light,)
+        if journal.identity != hashlib.sha256(lights[0].device_id.encode()).hexdigest():
+            raise ValueError("Use the journal bound to the original physical lamp.")
+        self.light = lights[0]
+        self.lights = {item.light_id: item for item in lights}
+        self.resolvers = resolver if isinstance(resolver, dict) else {self.light.light_id: resolver}
+        if set(self.resolvers) != set(self.lights):
+            raise ValueError("Configure a resolver for every selected light.")
+        self.resolver = self.resolvers[self.light.light_id]
+        self.transport, self.journal, self.clock = transport, journal, clock
+        self.fleet = getattr(journal, 'fleet', False)
+        if len(lights) > 1 and not self.fleet:
+            raise ValueError("Use a target-bound journal for multiple lights.")
+        providers = {item.device_id: self.resolvers[item.light_id] for item in lights}
+        async def resolve(identity):
+            if identity not in providers:
+                raise CommandDenied("Select an allowed physical light.")
+            return await providers[identity](identity)
+        self.service = LightService(lights, resolve, timeout_seconds=8)
+        light_catalog(list(self.service.lights()))
         self.busy = asyncio.Lock()
 
     def current(self, assignment, deadline):
@@ -219,12 +241,21 @@ class HomeRunner:
     async def execute(self, assignment):
         if self.journal.receipt(assignment.operation_id) is not None:
             return
+        target = assignment.light_id
+        if target is None and not self.fleet and len(self.lights) == 1:
+            target = self.light.light_id
+        provider = self.resolvers.get(target)
         attempted, reserved = False, False
         outcome, status = {"status": "not_started", "state": "unavailable"}, "not_started"
         try:
+            if provider is None:
+                raise CommandDenied("Select an allowed light.")
             self.current(assignment, await self.transport.authorize(self.journal.agent_id, assignment))
             if assignment.action != "read":
-                self.journal.reserve(assignment.session_binding, self.light.light_id, assignment.action, assignment.operation_id)
+                if self.fleet:
+                    self.journal.reserve_target(assignment.session_binding, target, assignment.action, assignment.operation_id)
+                else:
+                    self.journal.reserve(assignment.session_binding, target, assignment.action, assignment.operation_id)
                 reserved = True
 
             # The guard obtains a new deadline after refresh. The initial grant cannot authorize dispatch.
@@ -241,15 +272,18 @@ class HomeRunner:
                     raise CommandDenied from None
 
             async with asyncio.timeout(8):
-                state = (await self.service.state(self.light.light_id, guard=final_guard) if assignment.action == "read"
-                    else await self.service.command(self.light.light_id, assignment.action, guard=final_guard))
+                state = (await self.service.state(target, guard=final_guard) if assignment.action == "read"
+                    else await self.service.command(target, assignment.action, guard=final_guard))
             if state == LightState.UNAVAILABLE:
                 outcome["status"], status = ("unknown", "unknown") if attempted else ("not_started", "not_started")
             else:
                 outcome = {"status": "confirmed", "state": str(state)}
                 status = "finished"
                 if assignment.action == "read":
-                    self.journal.reconcile()
+                    if self.fleet:
+                        self.journal.reconcile_target(target)
+                    else:
+                        self.journal.reconcile()
         except DuplicateCommand:
             prior = self.journal.command_status(assignment.operation_id)
             outcome["status"], status = (("unknown", "unknown") if prior in ("started", "dispatched", "unknown", "finished", "reconciled")
@@ -259,7 +293,8 @@ class HomeRunner:
         except Exception:
             outcome["status"], status = ("unknown", "unknown") if attempted else ("not_started", "not_started")
         finally:
-            await self.resolver.close()
+            if provider is not None:
+                await provider.close()
         if not reserved and self.journal.receipt(assignment.operation_id) is not None:
             return
         self.journal.complete(assignment, outcome, status if reserved else None)
@@ -273,9 +308,13 @@ class HomeRunner:
             if pending is not None:
                 await self.transport.result(pending)
                 self.journal.acknowledge(pending["operation_id"])
-            poll = self.journal.next_poll() | {"light": self.service.lights()[0]}
+            metadata = ({"lights": list(self.service.lights()), "catalog_revision": self.journal.catalog_revision}
+                        if self.fleet else {"light": self.service.lights()[0]})
+            poll = self.journal.next_poll() | metadata
             assignment, delay = await self.transport.poll(poll)
             if assignment is not None:
+                if self.fleet and assignment.light_id is None:
+                    raise PermissionUnavailable("The home assignment has no selected light.")
                 await self.execute(assignment)
                 pending = self.journal.pending()
                 if pending is not None:
@@ -284,27 +323,51 @@ class HomeRunner:
             return delay
 
 
-def load_home(path):
+def _prepare_home(path):
     from kasa import Credentials
 
     config = json_object(Path(path).read_text(encoding="utf-8"))
-    required = {"allowlist_file", "light_id", "device_host", "website_url", "website_key", "operation_db"}
+    common = {"allowlist_file", "light_id", "website_url", "website_key", "operation_db"}
+    fleet = "light_ids" in config
+    required = common | ({"light_ids", "device_hosts"} if fleet else {"device_host"})
     if not required <= set(config) or set(config) - required - {"username", "password"}:
         raise ValueError("Read an explicit private home configuration.")
     base = Path(path).resolve().parent
-    selected = [item for item in load_allowlist(base / config["allowlist_file"]) if item.light_id == config["light_id"]]
-    if len(selected) != 1 or selected[0].outlet_id is not None:
-        raise ValueError("Select exactly one standalone lamp.")
-    light_metadata({"light_id": selected[0].light_id, "name": selected[0].name, "room": selected[0].room})
+    allowed = {item.light_id: item for item in load_allowlist(base / config["allowlist_file"])}
+    ids = config["light_ids"] if fleet else [config["light_id"]]
+    if (not isinstance(ids, list) or not ids or any(not isinstance(value, str) for value in ids)
+            or len(set(ids)) != len(ids) or config["light_id"] not in ids or any(value not in allowed for value in ids)):
+        raise ValueError("Select explicit allowed light IDs and retain the journal's original lamp.")
+    ids = [config["light_id"]] + [value for value in ids if value != config["light_id"]]
+    selected = [allowed[value] for value in ids]
+    if any(item.outlet_id is not None for item in selected):
+        raise ValueError("Select standalone lamps for this home runner.")
+    light_catalog([{"light_id": item.light_id, "name": item.name, "room": item.room} for item in selected])
+    hosts = config["device_hosts"] if fleet else {config["light_id"]: config["device_host"]}
+    if not isinstance(hosts, dict) or set(hosts) != set(ids):
+        raise ValueError("Configure one private discovery hint per selected light.")
     credentials = None
     if "username" in config or "password" in config:
         if not all(isinstance(config.get(key), str) and config[key] for key in ("username", "password")):
             raise ValueError("Configure both private device credentials when required.")
         credentials = Credentials(config["username"], config["password"])
     transport = WebsiteTransport(config["website_url"], config["website_key"])
-    resolver = KasaPilotResolver(selected[0], config["device_host"], credentials=credentials)
-    journal = OutboundJournal(base / config["operation_db"], selected[0].device_id, transport.url)
-    return HomeRunner(selected[0], resolver, transport, journal)
+    resolvers = {item.light_id: KasaPilotResolver(item, hosts[item.light_id], credentials=credentials) for item in selected}
+    return selected, resolvers, transport, base / config["operation_db"], fleet
+
+
+def _build_home(prepared):
+    selected, resolvers, transport, database, fleet = prepared
+    if fleet:
+        from .fleet_journal import FleetJournal
+        journal = FleetJournal(database, selected, transport.url, clock=time.time)
+        return HomeRunner(selected, resolvers, transport, journal)
+    journal = OutboundJournal(database, selected[0].device_id, transport.url)
+    return HomeRunner(selected[0], resolvers[selected[0].light_id], transport, journal)
+
+
+def load_home(path):
+    return _build_home(_prepare_home(path))
 
 
 async def run(runner):
@@ -323,15 +386,29 @@ async def run(runner):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run the outbound-only one-lamp home connection.")
+    parser = argparse.ArgumentParser(description="Run the outbound-only selected-light home connection.")
     parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--check-config", action="store_true", help="Validate private selection without network calls or journal changes.")
     options = parser.parse_args()
+    if options.check_config:
+        try:
+            selected, _, _, _, fleet = _prepare_home(options.config)
+        except Exception:
+            parser.error("Read a valid explicit private home configuration.")
+        print(json.dumps({"valid": True, "selected_lights": len(selected), "multi_light": fleet}))
+        return
     try:
-        runner = load_home(options.config)
+        prepared = _prepare_home(options.config)
+        database = prepared[3]
+        database.parent.mkdir(parents=True, exist_ok=True)
     except Exception:
         parser.error("Read a valid explicit private home configuration.")
     try:
-        with runtime_lock(runner.journal.path):
+        with runtime_lock(database):
+            try:
+                runner = _build_home(prepared)
+            except Exception:
+                parser.error("Read a valid explicit private home configuration.")
             provider_log = logging.getLogger("kasa")
             provider_log.handlers = [logging.NullHandler()]
             provider_log.propagate = False
