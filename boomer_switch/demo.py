@@ -8,6 +8,8 @@ from enum import Enum
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from importlib.resources import files
 import json
+import socket
+import time
 
 from .lights import CommandDenied, Light, LightService
 
@@ -105,10 +107,12 @@ class _DemoHandler(BaseHTTPRequestHandler):
             self._reply(404, {"error": "Page unavailable."})
 
     def do_POST(self):
+        length = None
         try:
             length = int(self.headers.get("Content-Length", "0"))
             if not 0 < length <= 1024 or self.headers.get_content_type() != "application/json":
-                raise ValueError
+                self._reject_unread_body(length)
+                return
             body = json.loads(self.rfile.read(length))
             if not isinstance(body, dict):
                 raise ValueError
@@ -134,7 +138,32 @@ class _DemoHandler(BaseHTTPRequestHandler):
         except CommandDenied:
             self._reply(403, {"error": "Select an allowed light and action."})
         except (ValueError, TypeError):
-            self._reply(400, {"error": "Use a valid sample request."})
+            if length is None:
+                self._reject_unread_body(None)
+            else:
+                self._reply(400, {"error": "Use a valid sample request."})
+
+    def _reject_unread_body(self, length, *, status=400, body=None):
+        self.close_connection = True
+        self._reply(status, body if body is not None else {"error": "Use a valid sample request."},
+            headers=(("Connection", "close"),))
+        try:
+            self.wfile.flush()
+            # Keep the receive side open briefly so an in-flight body cannot reset the response.
+            self.connection.shutdown(socket.SHUT_WR)
+            deadline = time.monotonic() + 0.5
+            remaining = min(length, 65536) if length is not None and length >= 0 else 65536
+            while remaining:
+                seconds = deadline - time.monotonic()
+                if seconds <= 0:
+                    break
+                self.connection.settimeout(seconds)
+                chunk = self.rfile.read1(min(remaining, 4096))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        except OSError:
+            pass
 
     def _command(self, light_id, action):
         state = self.server._runner.run(self.server._service.command(light_id, action))
