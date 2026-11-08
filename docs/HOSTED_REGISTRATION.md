@@ -184,6 +184,23 @@ The hosting request limit provides the outer deadline.
 For the existing local mail facility, use `transport: sendmail`, an absolute `executable`, `sender`.
 Do not provision a new provider.
 
+For app-only DKIM, install the pinned `mail-signing` extra with the website release.
+Use `mail.dkim` with `domain`, `selector`, and absolute `private_key_path`.
+The sender domain must match `domain` exactly.
+Keep the RSA private key inside the private state directory, outside the document root.
+Use a 2048- to 4096-bit key and restrict its file mode to `0600` on the host.
+Publish only its public key at the isolated selector's `_domainkey` TXT record.
+Do not change SPF or DMARC to enable this app-only signer.
+Keep the key, real domain, selector record, and rollback details in private operator records.
+
+The application adds Date before it signs the exact SMTP or sendmail bytes.
+A signing refusal makes no provider attempt and keeps the unsent code recoverable.
+The optional signer fails closed when its configuration or key is invalid.
+Verify a captured synthetic message before activation.
+Provider acceptance and a valid local signature do not prove delivered authentication.
+Check the recipient's authentication results only under separate mail-test authority.
+Rollback removes `mail.dkim` and reloads the application; retain the old private key for recovery.
+
 Guest verification stays on email. Owner requests use [the private bot integration](OWNER_NOTIFICATIONS.md), with People as the manual fallback. Production does not email the owner.
 
 Registration retains its per-email and global send limits.

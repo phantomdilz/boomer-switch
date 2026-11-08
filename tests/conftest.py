@@ -11,6 +11,7 @@ MODULE_MARKERS = {
     "test_registration.py": ("registration",),
     "test_rendezvous.py": ("registration", "pilot"),
     "test_website.py": ("registration", "people"),
+    "test_mail_signing.py": ("registration",),
     "test_passenger.py": ("registration", "people", "pilot"),
     "test_owner_notifications.py": ("registration", "people"),
     "test_people.py": ("people",),

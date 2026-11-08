@@ -29,7 +29,8 @@ class Validator:
 @pytest.fixture
 def hosted(tmp_path, monkeypatch):
     class Transport:
-        def __init__(self, executable):
+        def __init__(self, executable, *, signer=None):
+            assert signer is None
             self.messages = []
 
         def send(self, message):

@@ -37,7 +37,9 @@ def invoke(app, path, body=None, cookie='', csrf='', **extra):
 @pytest.fixture
 def integration(tmp_path, monkeypatch, php_runtime):
     class Mail:
-        def __init__(self, path): self.messages = []
+        def __init__(self, path, *, signer=None):
+            assert signer is None
+            self.messages = []
         def send(self, message): self.messages.append(message)
     monkeypatch.setattr('boomer_switch.website_cgi.SendmailTransport', Mail)
     capture = tmp_path / 'telegram.jsonl'
