@@ -101,6 +101,7 @@ class WebsiteApplication:
                 result["home_status"] = self.rendezvous.access_status(raw, environ or {})
             result["home_ready"] = result.get("home_status") == "ready"
             if result["home_ready"]:
+                result["direct_commands"] = True
                 result["lights"] = self.rendezvous.display_lights(raw, environ or {})
                 if len(result["lights"]) == 1:
                     result["light"] = result["lights"][0]

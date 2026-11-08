@@ -258,7 +258,11 @@ def test_late_receipt_is_truth_but_never_fresh_state_or_new_authority(house):
     assert rv.machine(env(),'/home/result',result)['accepted']
     projected=rv.operation(raw,env(),item['operation_id'])
     assert projected['status']=='unknown' and projected['state']=='unavailable'
-    with pytest.raises(HomeUnavailable): queue(rv,raw,'off')
+    fresh = queue(rv,raw,'off')
+    next_assignment = poll(rv,5)['operation']
+    assert next_assignment['operation_id'] == fresh['operation_id']
+    store.operator('revoke','guest@example.invalid')
+    assert rv.machine(env(),'/home/authorize',bound(next_assignment,5))['allowed'] is False
 
 
 def test_read_compaction_preserves_mutation_dedupe_and_clears_terminal_private_facts(house):

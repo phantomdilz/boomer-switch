@@ -27,6 +27,7 @@ let version = 0;
 let lastAccess = 0;
 let catalogSignature = "";
 let legacyCatalog = false;
+let directCommands = false;
 function enableForms() {
   document.querySelectorAll("form fieldset").forEach(fieldset => fieldset.disabled = busy || !entry.canSubmit);
   document.querySelector("#entry-recovery").hidden = !entry.recoveryHint;
@@ -77,7 +78,7 @@ function clearControls(message) {
   version += 1;
   operation = null;
   controls.hidden = true;
-  lights.clear(); rooms.replaceChildren(); catalogSignature = "";
+  lights.clear(); rooms.replaceChildren(); catalogSignature = ""; directCommands = false;
   roomPicker.replaceChildren();
   roomNavigation.hidden = true;
   connectionMessage(message);
@@ -145,6 +146,7 @@ function renderCatalog(items, legacy) {
 function show(result) {
   approved = result.status === "approved";
   homeReady = approved && result.home_ready === true;
+  directCommands = homeReady && result.direct_commands === true;
   details.hidden = !["anonymous", "invited"].includes(result.status);
   verification.hidden = result.status !== "verify";
   connection.hidden = !approved;
@@ -191,7 +193,7 @@ async function startOperation(action, lightId, followUp = null) {
   const light = lights.get(lightId);
   if (busy || operation || !homeReady || !light || (action !== "read" && light.needsRefresh)) return;
   const fresh = light.confirmedAt !== null && Date.now() >= light.confirmedAt && Date.now() - light.confirmedAt < 4000;
-  if (action !== "read" && !fresh) { followUp = action; action = "read"; }
+  if (action !== "read" && !fresh && !directCommands) { followUp = action; action = "read"; }
   version += 1; busy = true;
   const id = crypto.randomUUID();
   const current = {id, lightId, until: Date.now() + 8000, version, followUp,
