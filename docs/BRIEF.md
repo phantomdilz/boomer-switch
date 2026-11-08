@@ -9,7 +9,7 @@ The guest page groups lights by room with names a visitor recognizes. Each light
 
 ## Guest registration and access
 1. The guest scans a QR code on a printed card or types the short URL printed beneath it. The QR holds the full invitation URL; the short link comes from a self-hosted URL shortener (e.g., YOURLS) and opens the same invitation.
-2. The guest enters a name and verifies their email with a one-time code. Only a valid invitation can start registration. The website sends the code through its existing mail system. It also sends one owner notice per pending, verified guest through that mail system. Repeat submissions do not send duplicate notices.
+2. The guest enters a name and verifies their email with a one-time code. Only a valid invitation can start registration. The website sends the code through its existing mail system. It sends one notice per pending, verified guest through the existing private owner bot, with signed Approve/Deny buttons and a People link. Guest verification stays on email. Repeat submissions do not send duplicate notices.
 3. The owner approves or denies. After approval the waiting page opens the controls automatically. The bookmarkable URL contains no invitation secret.
 4. Access lasts until removed by default; the owner can set an optional end date. An approved guest on a new phone can re-verify the same email without another approval.
 

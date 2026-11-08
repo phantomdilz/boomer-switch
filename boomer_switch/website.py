@@ -9,10 +9,11 @@ import secrets
 from urllib.parse import urlencode, urlsplit
 
 from .people import OwnerPrincipal, PeopleApplication, owner_cookie
-from .registration import AccessDenied, InvalidInvitation, _digest
+from .registration import AccessDenied, InvalidInvitation, StalePerson, _digest
 from .website_mail import MailUnavailable
 from .home_rendezvous import HomeUnavailable, OperationConflict
 from .website_grants import json_object
+from .owner_notifications import OWNER_DECISION_PATH
 
 
 OWNER_PATHS = ("/people", "/people.js", "/api/people")
@@ -22,7 +23,7 @@ REGISTRATION_MAIL_PATHS = ("/api/register", "/api/resend", "/api/verify")
 class WebsiteApplication:
     """Keep public registration separate from current server-authenticated People."""
 
-    def __init__(self, store, mail, *, origin, mount, owner_identity, grant_app=None, handoff=None, rendezvous=None):
+    def __init__(self, store, mail, *, origin, mount, owner_identity, grant_app=None, handoff=None, rendezvous=None, owner_actions=None):
         parsed = urlsplit(origin)
         if parsed.scheme != "https" or not parsed.netloc or parsed.path or parsed.query or parsed.fragment or parsed.username:
             raise ValueError("Configure the HTTPS website origin.")
@@ -33,6 +34,7 @@ class WebsiteApplication:
         self.store, self.mail, self.origin, self.mount = store, mail, origin, mount
         self.owner_identity, self.grant_app, self.handoff = owner_identity, grant_app, handoff
         self.rendezvous = rendezvous
+        self.owner_actions = owner_actions
         self.people = PeopleApplication(store)
         with store._transaction() as db:
             db.execute("CREATE TABLE IF NOT EXISTS website_owners (id TEXT PRIMARY KEY, csrf TEXT NOT NULL, expires REAL NOT NULL)")
@@ -124,6 +126,16 @@ class WebsiteApplication:
         try:
             if environ.get("wsgi.url_scheme") != "https":
                 raise AccessDenied("Use HTTPS to open this page.")
+            if path == OWNER_DECISION_PATH and method == 'POST' and self.owner_actions is not None:
+                self.owner_actions.authorize(environ)
+                length = int(environ.get('CONTENT_LENGTH') or 0)
+                if not 0 < length <= 512 or environ.get('CONTENT_TYPE', '').split(';')[0] != 'application/json':
+                    raise ValueError
+                body = json_object(environ['wsgi.input'].read(length))
+                payload = self.owner_actions.decide(environ, body)
+                encoded = json.dumps(payload).encode()
+                start_response('200 OK', [('Content-Type', 'application/json'), ('Content-Length', str(len(encoded))), ('Cache-Control', 'no-store')])
+                return [encoded]
             if path in OWNER_PATHS:
                 if method == "POST" and environ.get("HTTP_ORIGIN") != self.origin:
                     raise AccessDenied("Open the private People page.")
@@ -209,7 +221,7 @@ class WebsiteApplication:
                 payload = self._access(raw, environ)
             else:
                 status, payload = "404 Not Found", {"error": "Page unavailable."}
-        except OperationConflict as error:
+        except (OperationConflict, StalePerson) as error:
             status, payload = "409 Conflict", {"error": str(error)}
         except InvalidInvitation as error:
             if method == "GET":

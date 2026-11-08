@@ -1,4 +1,6 @@
 from pathlib import Path
+import os
+import shutil
 
 import pytest
 
@@ -10,6 +12,7 @@ MODULE_MARKERS = {
     "test_rendezvous.py": ("registration", "pilot"),
     "test_website.py": ("registration", "people"),
     "test_passenger.py": ("registration", "people", "pilot"),
+    "test_owner_notifications.py": ("registration", "people"),
     "test_people.py": ("people",),
     "test_invitation_pdf.py": ("cards",),
     "test_pilot.py": ("pilot",),
@@ -18,6 +21,15 @@ MODULE_MARKERS = {
     "test_home_runner.py": ("pilot",),
     "test_tooling.py": ("tooling",),
 }
+
+
+@pytest.fixture
+def php_runtime():
+    selected = os.environ.get('BOOMER_TEST_PHP') or shutil.which('php')
+    path = Path(selected) if selected else Path(__file__).resolve().parents[1] / 'data/php-runtime/bin/php.exe'
+    if not path.is_file():
+        pytest.skip('The optional native PHP runtime is unavailable.')
+    return path
 
 
 def pytest_collection_modifyitems(items):
