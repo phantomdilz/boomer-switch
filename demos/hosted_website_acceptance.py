@@ -62,8 +62,19 @@ class FixtureServer(ThreadingMixIn, WSGIServer):
     def enable_tls(self, context):
         self.socket = context.wrap_socket(self.socket, server_side=True, do_handshake_on_connect=False)
 
-    def handle_error(self, _request, _client_address):
-        print(f"CHECK: fixture request error ({type(sys.exception()).__name__})", flush=True)
+    def shutdown_request(self, request):
+        try:
+            if isinstance(request, ssl.SSLSocket) and request.version() is not None:
+                # The WSGI TCP server otherwise closes TLS without close_notify.
+                request.settimeout(1)
+                request.unwrap()
+        except OSError:
+            self.handle_error(request, None, phase="TLS close")
+        finally:
+            super().shutdown_request(request)
+
+    def handle_error(self, _request, _client_address, *, phase="request"):
+        print(f"CHECK: fixture {phase} error ({type(sys.exception()).__name__})", flush=True)
 
     def get_request(self):
         connection, address = super().get_request()
