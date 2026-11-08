@@ -187,10 +187,8 @@ class HomeRendezvous:
                 return self._projection(previous)
             if db.execute("SELECT 1 FROM home_operations WHERE expires>? AND generation=? AND invalidated=0 AND status IN ('queued','leased','authorized') LIMIT 1", (now,current['generation'])).fetchone():
                 raise OperationConflict("Wait for the current operation to finish.")
-            if body['action'] != 'read':
-                recent = db.execute("SELECT outcome FROM home_operations WHERE generation=? AND light_id=? AND created>? AND invalidated=0 AND outcome IS NOT NULL ORDER BY created DESC LIMIT 1", (current['generation'],target,now-self.FRESH)).fetchone()
-                if recent is None or json.loads(recent['outcome'])['status'] != 'confirmed':
-                    raise HomeUnavailable("Refresh the confirmed state before another command.")
+            # The home runner refreshes this target before final dispatch authorization.
+            # Its target-bound journal blocks uncertain commands until a confirmed read.
             # Expired operations remain receipts. They never return to the queue.
             db.execute('INSERT INTO home_operations(id,session,peer,generation,action,status,created,expires,poll_sequence,outcome,completed,light_id,targeted) VALUES (?,?,?,?,?,?,?, ?,NULL,NULL,NULL,?,?)',
                        (operation_id,_digest(raw),peer,current['generation'],body['action'],'queued',now,now+self.TTL,target,int('light_id' in body)))

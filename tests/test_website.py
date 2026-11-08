@@ -616,6 +616,9 @@ def test_approved_refresh_distinguishes_known_mismatch_from_unavailable(hosted, 
     assert result["home_status"] == expected
     assert result["home_ready"] is (expected == "ready")
     assert ("light" in result) is (expected == "ready")
+    assert ("direct_commands" in result) is (expected == "ready")
+    if expected == "ready":
+        assert result["direct_commands"] is True
     assert A not in payload.decode() and CELL not in payload.decode()
     store.operator("revoke", "guest@example.invalid")
     result = json.loads(invoke(app, "/api/access", cookie=cookie, **peer)[2])

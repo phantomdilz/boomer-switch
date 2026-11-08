@@ -89,6 +89,29 @@ test("one explicit On request checks only its target, then dispatches once",asyn
   await f.light("desk").off.click();await f.tick();await f.tick();
   assert.deepEqual(f.posts.slice(2).map(p=>[p.action,p.light_id]),[["read","desk"],["off","desk"]]);
 });
+test("direct command capability skips redundant reads but keeps unknown recovery explicit",async()=>{
+  const f=await fixture({status:"approved",home_ready:true,lights:catalog,direct_commands:true});
+  await f.light("desk").on.click();
+  assert.deepEqual(f.posts.map(p=>[p.action,p.light_id]),[["on","desk"]]);
+  assert.equal(f.light("desk").stateLine.textContent,"Checking","never show optimistic On");
+  await f.tick();assert.equal(f.light("desk").stateLine.textContent,"On");
+  for(let i=0;i<9;i++)await f.tick();
+  assert.equal(f.posts.length,1,"no automatic reads after state expires");
+  f.result=async op=>({status:"unknown",state:"unavailable",availability:"unknown",light_id:op.light_id});
+  await f.light("desk").off.click();await f.tick();
+  assert.deepEqual(f.posts.map(p=>p.action),["on","off"]);
+  assert.equal(f.light("desk").stateLine.textContent,"Unknown");assert.ok(f.light("desk").on.disabled);
+  await f.light("desk").on.click();assert.equal(f.posts.length,2,"unknown result never causes automatic retry");
+  f.result=null;await f.light("desk").refresh.click();await f.tick();
+  assert.deepEqual(f.posts.map(p=>p.action),["on","off","read"]);
+  assert.equal(f.light("desk").on.disabled,false);
+});
+test("only an explicit direct capability bypasses the legacy preread",async()=>{
+  for(const flag of [undefined,false,"true"]) {
+    const f=await fixture({status:"approved",home_ready:true,lights:catalog,direct_commands:flag});
+    await f.light("desk").on.click();assert.deepEqual(f.posts.map(p=>p.action),["read"]);
+  }
+});
 test("unavailable and unknown are independent and block follow-up commands",async()=>{
   const f=await fixture();f.result=async op=>({status:"not_started",state:"unavailable",availability:"unavailable",light_id:op.light_id});
   await f.light("window").refresh.click();await f.tick();
