@@ -16,8 +16,23 @@ npm-debug.log*
 .env*
 !.env.example
 config.local.*
+*.local.json
+*.local.php
 *.db
 *.sqlite*
 data/
 secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+*.pdf
+# Test and tool output
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+playwright-report/
+test-results/
+*.log
 .DS_Store

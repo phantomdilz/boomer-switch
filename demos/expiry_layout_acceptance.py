@@ -140,5 +140,5 @@ def run(output):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--output', type=Path, default=ROOT / '.test-runs/pj91-expiry')
+    parser.add_argument('--output', type=Path, default=ROOT / '.test-runs/expiry-layout')
     run(parser.parse_args().output)

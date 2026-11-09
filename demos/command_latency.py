@@ -201,7 +201,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--baseline", default="d283d02")
     parser.add_argument("--repeats", type=int, default=3)
-    parser.add_argument("--output", type=Path, default=ROOT / "data" / "pj88-latency" / "measurement.json")
+    parser.add_argument("--output", type=Path, default=ROOT / "data" / "command-latency" / "measurement.json")
     options = parser.parse_args()
     if not 1 <= options.repeats <= 10:
         parser.error("Use from 1 through 10 repeats.")

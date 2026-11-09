@@ -136,5 +136,5 @@ async def run(output):
 
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser();parser.add_argument('--output',type=Path,default=ROOT/'data/pj89-probe/measurement.json');options=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--output',type=Path,default=ROOT/'data/state-probe/measurement.json');options=parser.parse_args()
     asyncio.run(asyncio.wait_for(run(options.output),45))

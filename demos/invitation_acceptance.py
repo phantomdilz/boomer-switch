@@ -210,7 +210,7 @@ def run(output, template=None, check_card=False):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--output', type=Path, default=ROOT / '.test-runs/pj87-invitation')
+    parser.add_argument('--output', type=Path, default=ROOT / '.test-runs/invitation-card')
     parser.add_argument('--template', type=Path)
     parser.add_argument('--check-card', action='store_true')
     options = parser.parse_args()

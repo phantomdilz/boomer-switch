@@ -215,5 +215,5 @@ def run(output):
 
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser();parser.add_argument('--output',type=Path,default=ROOT/'.test-runs/pj89-state-updates')
+    parser=argparse.ArgumentParser();parser.add_argument('--output',type=Path,default=ROOT/'.test-runs/state-updates')
     args=parser.parse_args();run(args.output)
