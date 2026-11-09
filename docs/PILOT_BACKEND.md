@@ -165,7 +165,7 @@ Repeated connection or acknowledgement failures produce one plain operator messa
 The active home entry point is the outbound runner. It opens no guest listener.
 The production website factory exposes the outbound rendezvous and same-origin controls.
 
-Retained tests cover exact Kasa identity, zero SDK retries, target-bound journals, unknown outcomes, and old adapter isolation.
+Retained tests cover exact Kasa identity, zero SDK retries, target-bound journals, and unknown outcomes.
 Outbound tests cover source-generation rotation, stale and offline denial, fresh dispatch authorization, and persistent result recovery.
 
 ## Remaining live checks

@@ -36,7 +36,7 @@ markers = [
   "registration: invitations, verification, and demo access",
   "people: private owner access management",
   "cards: private-template invitation rendering",
-  "pilot: real-provider adapters and closed-by-default live ingress",
+  "pilot: real-provider adapters and the outbound home runner",
   "tooling: test infrastructure checks",
   "smoke: fast deterministic acceptance checks",
 ]
