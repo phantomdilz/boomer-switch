@@ -19,7 +19,6 @@ MODULE_MARKERS = {
     "test_people.py": ("people",),
     "test_invitation_pdf.py": ("cards",),
     "test_pilot.py": ("pilot",),
-    "test_guest_proxy.py": ("pilot",),
     "test_hosted_tls.py": ("demo", "pilot"),
     "test_fleet.py": ("pilot", "registration"),
     "test_home_runner.py": ("pilot",),

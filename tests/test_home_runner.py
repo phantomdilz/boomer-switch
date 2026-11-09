@@ -270,8 +270,6 @@ def test_main_entry_has_no_listener_and_example_has_no_network_ingress_fields():
     assert set(example) == {"allowlist_file", "light_id", "device_host", "website_url", "website_key", "operation_db"}
     help_result = subprocess.run([sys.executable, "-m", "boomer_switch.pilot", "--help"], capture_output=True, text=True, timeout=10, cwd=root)
     assert help_result.returncode == 0 and "outbound-only" in help_result.stdout and "--port" not in help_result.stdout
-    retired = subprocess.run([sys.executable, "-m", "boomer_switch.guest_proxy"], capture_output=True, text=True, timeout=10, cwd=root)
-    assert retired.returncode == 2 and "No guest listener is needed" in retired.stderr
 
 
 def test_crash_left_duplicate_cannot_clear_uncertain_dispatch(tmp_path):
