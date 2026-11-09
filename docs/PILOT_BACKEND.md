@@ -160,13 +160,10 @@ A crash after dispatch leaves the uncertainty in the journal. Keep that journal 
 Do not delete or reuse it to bypass unresolved work.
 Repeated connection or acknowledgement failures produce one plain operator message without tokens, addresses, names, or raw provider errors.
 
-## Retired local ingress
+## Adapter tests
 
-The Windows guest proxy, Wi-Fi attachment producer, browser handoff, local TLS server, and reachability diagnostic are superseded.
-They are not part of the active entry point and require no setup on a guest-side computer.
-Their imported components remain available for isolated historical callers and synthetic regression tests.
+The active home entry point is the outbound runner. It opens no guest listener.
 The production website factory exposes the outbound rendezvous and same-origin controls.
-The old `pilot.example.json` and `guest.example.json` are legacy fixtures, not current setup instructions.
 
 Retained tests cover exact Kasa identity, zero SDK retries, target-bound journals, unknown outcomes, and old adapter isolation.
 Outbound tests cover source-generation rotation, stale and offline denial, fresh dispatch authorization, and persistent result recovery.

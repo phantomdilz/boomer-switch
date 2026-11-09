@@ -1,5 +1,4 @@
 import asyncio
-import base64
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 import hashlib
@@ -7,12 +6,9 @@ from http.client import HTTPSConnection, RemoteDisconnected
 import ipaddress
 from io import BytesIO
 import json
-import os
-from pathlib import Path
 import sqlite3
 import socket
 import ssl
-import subprocess
 import time
 from threading import Thread
 from wsgiref.simple_server import make_server
@@ -21,7 +17,6 @@ import uuid
 from kasa.iot.iotplug import IotPlug
 import pytest
 
-from boomer_switch.guest_reachability import MARKER, RESPONSE, serve_marker
 from boomer_switch.kasa_pilot import KasaPilotResolver, SingleAttemptProtocol
 from boomer_switch.lights import CommandDenied, Light
 from boomer_switch.pilot import ClosedIngress, CommandJournal, DuplicateCommand, GuestSession, MTLSIngress, PilotApplication, PilotBackend, runtime_lock, _BoundedServer, _QuietHandler
@@ -533,96 +528,3 @@ def test_one_physical_identity_owns_each_journal_and_reconciliation(tmp_path):
         CommandJournal(path, "synthetic-other-device")
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT status FROM commands").fetchone()[0] == "dispatched"
-
-
-def test_reachability_marker_is_fixed_bounded_and_independent_of_devices(capsys):
-    now = [0.0]
-
-    class Connection:
-        sent = b""
-        closed = False
-
-        def __enter__(self): return self
-        def __exit__(self, *_args): self.closed = True
-        def settimeout(self, value): assert 0 < value <= 1
-        def recv(self, maximum):
-            assert maximum == 2048
-            now[0] += 0.1
-            return b"GET /private-file HTTP/1.1\r\n\r\n"
-        def sendall(self, data):
-            self.sent = data
-            now[0] += 0.1
-
-    connection = Connection()
-
-    class Listener:
-        accepted = False
-        timeout = 0
-        bound = None
-        closed = False
-
-        def __enter__(self): return self
-        def __exit__(self, *_args): self.closed = True
-        def bind(self, address): self.bound = address
-        def listen(self, backlog): assert backlog == 2
-        def settimeout(self, value): self.timeout = value
-        def accept(self):
-            if not self.accepted:
-                self.accepted = True
-                return connection, None
-            now[0] += self.timeout
-            raise TimeoutError
-
-    listener = Listener()
-    address = str(ipaddress.IPv4Address((192 << 24) + (2 << 8) + 1))
-    serve_marker(address, 8769, 2, clock=lambda: now[0], socket_factory=lambda *_args: listener)
-    assert listener.bound == (address, 8769)
-    assert connection.sent == RESPONSE and RESPONSE.endswith(MARKER)
-    assert listener.closed and connection.closed and now[0] <= 2
-    assert f"http://{address}:8769/" in capsys.readouterr().out
-
-
-@pytest.mark.skipif(os.name != "nt", reason="The downloadable check uses native Windows PowerShell.")
-def test_downloadable_marker_native_selection_and_finite_loopback():
-    source = (Path(__file__).parents[1] / "guest-reachability.cmd").read_text(encoding="ascii")
-    functions = source.split(":POWERSHELL\n", 1)[1].split("# RUN", 1)[0]
-    synthetic = r"""
-$private = [Net.IPAddress]::new([byte[]](192,168,250,2))
-$wifi = [pscustomobject]@{Kind='Wireless80211';Up=$true;Addresses=@($private)}
-if ((Select-MarkerAddress @($wifi)).ToString() -ne $private.ToString()) { throw 'Selection failed' }
-foreach ($items in @(@(), @($wifi,$wifi), @([pscustomobject]@{Kind='Ethernet';Up=$true;Addresses=@($private)}))) {
-    $denied = $false
-    try { Select-MarkerAddress $items | Out-Null } catch { $denied = $true }
-    if (-not $denied) { throw 'Ambiguous or absent wireless adapter was accepted' }
-}
-Start-Marker ([Net.IPAddress]::Loopback) 0 1
-"""
-    encoded = base64.b64encode((functions + synthetic).encode("utf-16-le")).decode()
-    executable = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
-    process = subprocess.Popen([str(executable), "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    try:
-        # The real .NET listener uses only an ephemeral loopback port and fixed synthetic text.
-        lines = []
-        for line in process.stdout:
-            lines.append(line)
-            if line.strip().startswith("http://"):
-                port = int(line.strip().rsplit(":", 1)[1].rstrip("/"))
-                break
-        else:
-            raise AssertionError("The synthetic marker did not start: " + "".join(lines) + process.stderr.read())
-        with socket.create_connection((str(ipaddress.IPv4Address((127 << 24) + 1)), port), timeout=2) as client:
-            client.sendall(b"GET /not-a-file HTTP/1.1\r\nHost: localhost\r\n\r\n")
-            payload = bytearray()
-            while chunk := client.recv(4096):
-                payload.extend(chunk)
-        stdout, stderr = process.communicate(timeout=8)
-        assert process.returncode == 0, stderr
-        assert bytes(payload) == RESPONSE
-        assert "listener is closed" in stdout
-        with pytest.raises(OSError):
-            socket.create_connection((str(ipaddress.IPv4Address((127 << 24) + 1)), port), timeout=0.2)
-    finally:
-        if process.poll() is None:
-            process.kill()
-        process.communicate(timeout=3)
