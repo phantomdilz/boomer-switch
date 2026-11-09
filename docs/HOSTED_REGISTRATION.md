@@ -8,8 +8,8 @@ No inbound home service, tunnel, or port forwarding forms part of this route.
 
 Every state request and command requires a current verified approval and the current home internet source.
 The website compares its direct IPv4 peer with the source of a fresh authenticated home poll.
-This proves shared internet egress. It does not distinguish Wi-Fi, wired clients, or a VPN through home.
-The operator accepted that boundary. A cellular or other remote source fails closed.
+This shows shared internet egress. It does not distinguish Wi-Fi, wired clients, or a VPN through home.
+A cellular or other remote source fails closed.
 
 ## IPv4 and trusted hosting
 
@@ -227,66 +227,18 @@ A fresh production directory starts with new invitation state.
 Later code updates retain that directory, so accepted approvals, invitation URLs, and guest cookies survive.
 Do not restore an old database over accepted People decisions.
 
-## Current source and operation contract
+## Source checks and guest timing
 
-`POST /home/poll` requires HTTPS, the private Bearer key, and direct source evidence.
-Its body is `{agent_id, sequence, request_id, light}` with canonical UUIDs and a durable increasing sequence.
-The first valid poll binds the single agent identity.
-Another agent or a lower sequence cannot replace its state.
+Poll, authorize, and result bodies, generation rules, and poll intervals are in [the home connection guide](PILOT_BACKEND.md). These website rules sit on top of that contract:
 
-The `light` field holds only the owner-selected public `light_id`, `name`, and `room`.
-Only an approved matching-source browser can receive these labels.
-An exact same-source retry does not extend freshness.
-
-The website atomically updates the authenticated source and connection generation.
-An address change or a gap of at least 6 seconds starts a new generation.
-An authenticated source mismatch on another agent request retires the old epoch until a fresh ordered poll.
-An observed guest source change invalidates that guest's open assignments, even after a return to the old source.
-
-After home returns from A through B to A, its old generation remains invalid.
-An old or reordered poll cannot restore the old source.
-A queued tap expires after 8 seconds and never returns to the queue.
-A reconnect cannot revive a tap from before a freshness gap, even on the same address.
-
-The poll response is `{request_id, generation, expires, poll_after, operation}`.
-An assignment is `{operation_id, action, session_binding, generation, expires}`.
-`action` is `read`, `on`, or `off`. The session binding is a hash, not a browser cookie.
-Each operation receives one poll assignment. A later poll never delivers it again.
-The home journal prevents duplicate physical dispatch after ambiguous requests or restarts.
-
-Before dispatch, the home agent posts `{agent_id, sequence, request_id, operation_id, generation}` to `/home/authorize`.
-The website checks current canonical approval, session expiry, source, freshness, generation, and operation expiry again.
-The response is `{allowed, request_id, operation_id, generation, expires}` with at most 2 seconds of authority.
-Its deadline never exceeds the source proof or operation deadline.
-A browser demand hint alone grants no state or device authority.
-
-The agent posts the same assignment fields plus `outcome` to `/home/result`.
-An outcome is `{status, state}` with a bounded confirmed or unavailable result.
-An exact result retry is accepted. A conflicting result fails.
-A bound result can record truth after a later address change, but it grants no new operation.
-Guests cannot read an old generation's result as current state.
-
-Late receipts remain truth, but state freshness uses the operation issue time, not the receipt arrival.
-Expired read rows receive a 60-second grace period, then the website removes them.
-The runner drops expired read receipts. Mutation deduplication and unresolved effects remain durable.
-Completed mutation rows lose obsolete peer and session data. Indexed queue and cleanup queries bound routine scans.
-
-## Cadence and ordinary guest flow
-
-The default idle poll interval is 15 seconds, or 5,760 requests per day.
-An operator can select 60 seconds, or 1,440 idle requests per day.
-Recent approved browser interest from the matching source selects a 1-second active interval.
-A continuously active connection can make 86,400 polls per day.
-The home runner enforces at least 1 second between cycles, including failures.
-
-The visible browser checks access every 3 seconds and a pending operation each second.
-It pauses while hidden and requests fresh confirmed state at least every 5 seconds while active.
-The first visit or reconnect can wait up to the configured idle interval, plus bounded state-query time.
-The website waits for a demand-aware fast poll before it accepts work.
-The same page shows that wait and automatically checks again. The guest needs no reload.
-
-Offline taps do not enter a durable queue.
-Unavailable or uncertain state disables On and Off until a fresh read confirms state.
+- The first valid poll binds one agent. Another agent, or a lower sequence, cannot replace it.
+- A retry from the same address does not extend freshness. A guest source change drops that guest's open assignments, including a later return to the old address. An old or reordered poll cannot restore the retired generation.
+- A queued tap expires after 8 seconds and is not put back. A reconnect does not revive a tap from before a freshness gap.
+- Each operation is assigned once. The home journal blocks a second physical dispatch after an ambiguous result or a restart.
+- Guests cannot read an older generation's result as the current state. A late receipt can still record what happened. Freshness uses the time the operation was issued, not when the receipt arrived.
+- Expired read rows stay for 60 seconds, then the website deletes them. The runner drops expired read receipts. Mutation deduplication and unresolved effects stay. Finished mutation rows drop old peer and session fields.
+- The open page checks access about every 3 seconds and a pending operation about once a second. It pauses while hidden. The first visit can wait for the next home poll. The page shows that wait. Offline taps are not queued.
+- On and Off stay disabled while state is unavailable or uncertain, until a fresh read confirms it.
 
 ## Staged installation and rollback
 

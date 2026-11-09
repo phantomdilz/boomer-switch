@@ -98,7 +98,5 @@ The Passenger `people_write_enabled` switch also pauses bot decisions; `mail_ena
 Rollback selects the prior webhook and website release without restoring old permission data.
 Never replay unknown notifications or wipe callback receipts during rollback.
 
-Native synthetic acceptance uses `BOOMER_TEST_PHP` to select an installed PHP executable.
-All Telegram and mail providers are injected test doubles. No live message is part of these tests.
-The [Telegram Bot API](https://core.telegram.org/bots/api#inlinekeyboardbutton) limits callback data to 64 bytes;
-these action payloads are 54 bytes.
+Tests stand in for Telegram and mail. They send nothing. Set `BOOMER_TEST_PHP` to an installed PHP executable when running them.
+The [Telegram Bot API](https://core.telegram.org/bots/api#inlinekeyboardbutton) limits callback data to 64 bytes. These action payloads are 54 bytes.

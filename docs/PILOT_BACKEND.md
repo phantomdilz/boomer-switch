@@ -66,12 +66,9 @@ It needs a newer confirmed observation or an explicit confirmed refresh. Source 
 
 The UI keeps the last confirmed On or Off with its age and marks reports older than 45 seconds stale.
 An unavailable or unknown result remains distinct from a stale report and never becomes a confirmed Off.
-The bounded synthetic probe is `python demos/automatic_updates_probe.py`; it makes no network or device calls.
-Its two-guest, 15-light virtual sweep observed all targets in 62 seconds, with 44 read operations and 88 device update calls over 90 simulated seconds.
-Under simulated 50 ms HTTP/device calls, wall-clock tap-to-actuation was about 0.64 seconds with no read or an unleased read, and 1.16 seconds behind a read held for 250 ms.
-These are fixture measurements, not household latency guarantees. A slow or unreachable device can increase a full pass; visible room hints do not starve the remaining catalog.
-`demos/multi_light_acceptance.py` now checks automatic changes, stale age labels, hidden stop, room focus, priority controls, and the older explicit-read fallback.
-This replaces its former no-background-read criterion; domain tests retain the global cap, two-guest fairness, target isolation, expiry, and authorization distinctions.
+A slow or unreachable device can stretch a full pass. Visible-room hints do not starve the rest of the catalog.
+`python demos/automatic_updates_probe.py` measures a simulated sweep and makes no network or device calls.
+`demos/multi_light_acceptance.py` checks automatic changes, stale age labels, hidden tabs, room focus, and the older explicit-read fallback.
 
 A guest's explicit refresh or command still supplies the exact target ID.
 The website permits a direct On or Off request for a selected light without a separate cached read.
@@ -172,8 +169,7 @@ The production website factory exposes the outbound rendezvous and same-origin c
 The old `pilot.example.json` and `guest.example.json` are legacy fixtures, not current setup instructions.
 
 Retained tests cover exact Kasa identity, zero SDK retries, target-bound journals, unknown outcomes, and old adapter isolation.
-Outbound tests replace the active ingress scenarios with source-generation rotation, stale/offline denial, fresh dispatch authorization, and persistent result recovery.
-The website integration must merge the exact reviewed PJ-60 head before its combined acceptance check.
+Outbound tests cover source-generation rotation, stale and offline denial, fresh dispatch authorization, and persistent result recovery.
 
 ## Remaining live checks
 
@@ -185,32 +181,10 @@ No deployment, provider call, router change, guest isolation change, or physical
 The pilot extra pins python-kasa 0.12.0 (GPL-3.0-or-later) and aiohttp 3.14.5 (Apache-2.0 AND MIT).
 Their source is not copied into this repository. The project source remains under its MIT license.
 
+## Direct commands
 
-## Synthetic command latency
+When the access response includes `direct_commands: true`, the page sends On or Off without a separate cached read. The home runner still refreshes that device before dispatch and confirms state afterward. Older servers keep the read-then-command path.
 
-Run `python demos/command_latency.py --baseline d283d02 --repeats 3` for a local comparison.
-It exercises the real hosted queue, journal, authorization, and unchanged home runner with a simulated device and transport.
-Both versions use the same request latency, device latency, and poll phases.
+An uncertain result stays blocked until a newer confirmed read. The client does not retry the command. This does not shorten the idle poll wait before controls become ready.
 
-The idle case has ready controls but no prior confirmed device state. The warm case has a fresh confirmed read.
-This measures tap-to-simulated-actuation and confirmation. It does not measure browser rendering, WAN latency, or installed hardware.
-The JSON evidence includes each sample and request counts under `data/pj88-latency/measurement.json`.
-
-The approved, home-ready access response advertises `direct_commands: true`.
-The updated client then sends the requested command directly. Older servers without this capability keep the explicit read-then-command path.
-The PJ88 comparison did not include automatic reads. The current client keeps an unknown result blocked until an explicit confirmed refresh or a newer confirmed automatic observation.
-It never retries an uncertain command. The automatic-update measurements above include read contention separately.
-
-
-The three paired samples against `d283d02` produced these tap-to-simulated-actuation medians:
-
-| Ready-control state | Baseline | Revised |
-| --- | ---: | ---: |
-| No prior confirmed device state | 1641 ms | 635 ms |
-| Fresh confirmed state | 639 ms | 634 ms |
-
-Both cases used 50 ms simulated website calls, 50 ms device queries, and identical 1-second home and UI poll schedules.
-The no-prior-state case removed one queue cycle: two guest operations became one, and four authorizations became two.
-Device updates fell from five to three. The remaining three include the command's device refresh and confirmed readback.
-Warm-path ranges overlap, so these samples do not establish a warm-path improvement.
-This change does not reduce the 15-second idle heartbeat wait before controls become ready.
+`python demos/command_latency.py` compares the path with an older git revision using simulated delays. It does not measure a browser, a wide-area link, or real hardware. Pass `--baseline` as a revision that still contains `boomer_switch/home_runner.py`.
